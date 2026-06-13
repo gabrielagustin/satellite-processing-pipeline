@@ -4,7 +4,7 @@
 
 Satellite Processing Pipeline (SPP) is a modular Earth Observation processing framework designed to transform raw payload acquisitions into higher-level geospatial products.
 
-The framework follows a processing-level architecture inspired by CEOS product levels and common EO processing systems.
+The framework follows a processing-level architecture inspired by Committee on Earth Observation Satellites (CEOS) product levels and common EO processing systems.
 
 ```text
 Raw Acquisition
