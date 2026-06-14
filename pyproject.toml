@@ -1,0 +1,12 @@
+[project]
+name = "satellite-processing-pipeline"
+version = "0.1.0"
+description = "Satellite data processing framework"
+requires-python = ">=3.11"
+
+dependencies = [
+    "numpy",
+    "rasterio",
+    "xarray",
+    "pystac",
+]
