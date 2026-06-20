@@ -49,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="DN at/above which a pixel is flagged as saturated (default: off).",
     )
     parser.add_argument(
+        "--quicklook", action="store_true",
+        help="Also write an RGB quicklook PNG (needs the R, G, B bands).",
+    )
+    parser.add_argument(
         "--quiet", "-q", action="store_true",
         help="Only print the final summary.",
     )
@@ -79,8 +83,24 @@ def main(argv: list[str] | None = None) -> int:
     report_path = args.output / "qa_report.json"
     report_path.write_text(json.dumps(qa, indent=2))
 
+    if args.quicklook:
+        _write_quicklook(product, args.output)
+
     _print_summary(product, report_path)
     return 0 if qa["passed"] else 1
+
+
+def _write_quicklook(product, output_dir: Path) -> None:
+    from spp.qa.quicklook import write_quicklook
+
+    required = ("R", "G", "B")
+    if not all(b in product.bands for b in required):
+        logging.getLogger(__name__).warning(
+            "Skipping quicklook: needs bands %s", required
+        )
+        return
+    path = write_quicklook(product.bands, output_dir / "quicklook.png")
+    logging.getLogger(__name__).info("Wrote quicklook %s", path)
 
 
 def _print_summary(product, report_path: Path) -> None:
