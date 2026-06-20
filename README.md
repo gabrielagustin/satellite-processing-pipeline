@@ -132,6 +132,7 @@ satellite-processing-pipeline/
 | [decision_log.md](docs/decision_log.md) | Engineering decisions and trade-offs |
 | [limitations.md](docs/limitations.md) | Failure modes and next steps |
 | [validation_strategy.md](docs/validation_strategy.md) | How correctness is established |
+| [qa_report.md](docs/qa_report.md) | `qa_report.json` schema: metrics, flags, thresholds |
 | [generalisation.md](docs/generalisation.md) | Adapting to a new mission |
 | [input_package.md](docs/input_package.md) | Expected input package layout |
 | [references.md](docs/references.md) | Standards and tooling references |

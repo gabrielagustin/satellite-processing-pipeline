@@ -36,7 +36,8 @@ input NoData (DN = 0) pixels; all non-NoData outputs are finite.
 and standard deviation as a single-shot computation, so the streamed QA is exact.
 
 **QA flag logic.** Synthetic cases exercise each flag: `all_invalid`,
-`high_nodata`, `negative_radiance`, `saturation`, `zero_dynamic_range`.
+`high_nodata`, `negative_radiance`, `saturation`, `zero_dynamic_range`. The full
+per-band metric and flag schema is documented in [`qa_report.md`](qa_report.md).
 
 **Physical plausibility (full scene).** Across all eight bands the run passes QA,
 with radiance magnitudes in the expected range (e.g. red ≈ 40 W·m⁻²·sr⁻¹·nm⁻¹)
