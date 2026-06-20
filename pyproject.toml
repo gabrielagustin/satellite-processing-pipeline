@@ -1,12 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "satellite-processing-pipeline"
 version = "0.1.0"
-description = "Satellite data processing framework"
+description = "Modular, sensor-agnostic Earth Observation processing framework (L0 to L1B and beyond)"
 requires-python = ">=3.11"
 
 dependencies = [
-    "numpy",
-    "rasterio",
-    "xarray",
-    "pystac",
+    "numpy>=1.24",
+    "rasterio>=1.3",
 ]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.6"]
+
+[project.scripts]
+spp-l1b = "spp.cli.run_l1b:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
