@@ -69,17 +69,21 @@ class GeoTIFFWriter:
         """Open ``name`` for windowed writing, yielding a band-writer handle."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         path = self.output_dir / f"{name}{self.suffix}"
+        np_dtype = np.dtype(dtype)
         profile = {
             "driver": "GTiff",
             "width": width,
             "height": height,
             "count": 1,
-            "dtype": np.dtype(dtype).name,
+            "dtype": np_dtype.name,
             "nodata": nodata,
             "tiled": True,
             "blockxsize": self.blocksize,
             "blockysize": self.blocksize,
             "compress": self.compress,
+            # Predictor improves lossless compression: 3 (floating point) for
+            # float rasters, 2 (horizontal differencing) for integer rasters.
+            "predictor": 3 if np_dtype.kind == "f" else 2,
             "BIGTIFF": "IF_SAFER",
         }
         dataset = rasterio.open(path, "w", **profile)
