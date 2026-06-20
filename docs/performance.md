@@ -46,6 +46,39 @@ process in the same memory footprint.
 
 ---
 
+## Window / tile alignment
+
+The processing window and the GeoTIFF tiles are **two different units** that are
+made compatible on purpose:
+
+- a **tile** (512 × 512) is the *physical storage* block inside the GeoTIFF — the
+  unit of compression and random access on disk;
+- a **window** (`window_lines` tall, full width) is the *logical processing*
+  chunk read/calibrated/written per iteration.
+
+`window_lines = 2048` is chosen as an exact multiple of the tile size, and the
+window spans the full width, so each window covers a whole number of tiles:
+
+```text
+width : 4096 / 512 = 8 tiles
+height: 2048 / 512 = 4 tiles
+        → one window = 8 × 4 = 32 complete tiles
+```
+
+Because every window lands on tile boundaries:
+
+- **reads** decode only complete block-rows of the input COG (no partial-tile
+  waste);
+- **writes** cover complete output tiles, so each tile is compressed **once** —
+  a non-aligned window (e.g. `1000`) would split a 512-line tile across two
+  writes, forcing a read-modify-write that re-reads and re-compresses the
+  half-filled tile.
+
+The strip height (30948) is not a multiple of either, but `15 × 2048 = 30720 =
+60 × 512`, so the first 30720 lines are perfectly aligned and the final partial
+window (228 lines) coincides exactly with the final partial tile row — GDAL pads
+internally. Alignment holds end to end.
+
 ## The `window_lines` tuning knob
 
 Because `line_start` is threaded through every block, the result is **identical
@@ -56,8 +89,9 @@ regardless of window size** (verified — see
 - **larger** window → fewer I/O calls, more RAM per step;
 - **smaller** window → minimal RAM, slightly more overhead.
 
-Output is byte-identical either way, so it can be tuned to the host without any
-risk to correctness.
+Keep it a **multiple of the 512 tile size** (512, 2048, 4096 ...) so windows stay
+tile-aligned (see above). Output is byte-identical either way, so it can be tuned
+to the host without any risk to correctness.
 
 ---
 
