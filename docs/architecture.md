@@ -1,476 +1,148 @@
 # Architecture
 
-## Overview
+The Satellite Processing Pipeline (SPP) is a modular, sensor-agnostic Earth
+Observation framework. It transforms raw payload acquisitions into calibrated
+products through a chain of small, single-responsibility stages. This document
+describes the **implemented L1B architecture** and the interfaces it is built on.
 
-Satellite Processing Pipeline (SPP) is a modular Earth Observation processing framework designed to transform raw payload acquisitions into higher-level geospatial products.
+For the product levels themselves see
+[`product_hierarchy.md`](product_hierarchy.md); for how large strips are
+processed efficiently see [`performance.md`](performance.md).
 
-The framework follows a processing-level architecture inspired by Committee on Earth Observation Satellites (CEOS) product levels and common EO processing systems.
+---
+
+## Data flow
 
 ```text
-Raw Acquisition
-      │
-      ▼
-     L0
-      │
-      ▼
-     L1A
-      │
-      ▼
-     L1B
-      │
-      ▼
-     L1C
-      │
-      ▼
-      L2
+acquisition package (filesystem)
+        │
+        ▼
+   PackageReader.read()  ──►  Acquisition  (lazy bands + calibration + config)
+        │
+        ▼
+   L1BPipeline.run()
+        │   for each band, streaming windows of lines:
+        │       read DN window
+        │       ─► L1BCalibrator.calibrate(band, dn, line_start)  ─► radiance
+        │       ─► GeoTIFFWriter.write_block(radiance, line_start)
+        │       ─► RadiometricValidator accumulator.update(radiance, dn)
+        ▼
+   Product  +  qa_report.json  (+ quicklook.png)
 ```
 
-The current implementation focuses on the L0 → L1B transition while maintaining an architecture that can support future processing levels.
+Stages communicate through the core domain entities, never through ad-hoc dicts.
 
 ---
 
-# Design Goals
+## Layers and interfaces
 
-## Sensor Agnostic
+Each stage is an abstract base class (the seam) with a concrete implementation.
+The signatures below are the real ones.
 
-Sensor-specific information must be externalized whenever possible.
-
-Examples:
-
-* spectral bands
-* calibration coefficients
-* detector geometry
-* metadata mappings
-* quality thresholds
-
-The processing engine should not require code modifications when introducing a new sensor.
-
----
-
-## Modular Processing
-
-Each processing step should be independently testable.
-
-```text
-Reader
-   ↓
-Calibrator
-   ↓
-QA Validator
-   ↓
-Product Writer
-```
-
-Modules communicate through well-defined data structures.
-
----
-
-## Reproducibility
-
-Given the same inputs and configuration, the pipeline must always produce identical outputs.
-
----
-
-## Transparency
-
-Every product level should clearly define:
-
-* inputs
-* outputs
-* assumptions
-* validation criteria
-
----
-
-# High-Level Components
-
-## Reader Layer
-
-Responsible for loading acquisitions and calibration assets.
-
-### Responsibilities
-
-* Parse raw acquisition files
-* Load metadata
-* Validate file integrity
-* Expose data in a common format
-
-### Interface
+### Reader — `readers/`
 
 ```python
-class Reader:
-
-    def load_acquisition(self):
-        pass
-
-    def load_metadata(self):
-        pass
+class Reader(ABC):
+    def read(self) -> Acquisition: ...
 ```
 
-### Examples
+`PackageReader` discovers the band rasters (from the STAC assets) and the
+calibration assets (by glob), reads only raster **metadata** (lazy bands), parses
+the CPF and imager configuration, and assembles an `Acquisition`. No calibration,
+no processing.
 
-```text
-Raw Binary Reader
-GeoTIFF Reader
-NetCDF Reader
-```
-
----
-
-# Calibration Layer
-
-Transforms instrument measurements into physically meaningful quantities.
-
-### Responsibilities
-
-* Dark current correction
-* Offset correction
-* Gain correction
-* Radiometric conversion
-
-### Interface
+### Calibrator — `calibration/`
 
 ```python
-class Calibrator:
-
-    def apply(self, image):
-        pass
+class Calibrator(ABC):
+    def calibrate(self, band_name: str, dn: np.ndarray,
+                  line_start: int = 0) -> np.ndarray: ...
 ```
 
-### Current Focus
+`L1BCalibrator` converts a **block** of DN to at-aperture radiance. It is pure
+(NumPy in, NumPy out, no I/O); `line_start` lets along-track-varying terms (the
+temperature profile) be indexed correctly, which is what makes windowed
+processing exact.
 
-L1B radiometric calibration.
-
----
-
-# Quality Assurance Layer
-
-Evaluates product validity.
-
-### Responsibilities
-
-* Detect invalid values
-* Detect saturation
-* Verify metadata consistency
-* Generate QA reports
-
-### Interface
+### Quality validator — `qa/`
 
 ```python
-class QAValidator:
-
-    def validate(self, product):
-        pass
+class QAValidator(ABC):
+    def validate(self, product) -> dict: ...
 ```
 
-### Outputs
+`RadiometricValidator` provides a streaming `accumulator(band)` fed per window,
+plus a `validate(product)` that re-reads a finished product. It only measures
+(non-destructive) and emits the per-band metrics/flags documented in
+[`qa_report.md`](qa_report.md). `write_quicklook()` produces an RGB preview.
 
-```text
-QA Report
-Statistics
-Warnings
-Quicklooks
-```
-
----
-
-# Product Layer
-
-Responsible for generating output products.
-
-### Responsibilities
-
-* Write raster outputs
-* Generate metadata
-* Apply naming conventions
-
-### Interface
+### Product writer — `products/`
 
 ```python
-class ProductWriter:
-
-    def write(self, product):
-        pass
+class ProductWriter(ABC):
+    def open_band(self, name, *, width, height, dtype, nodata): ...  # context manager
 ```
 
----
+`GeoTIFFWriter` opens a band as a context-managed handle with
+`write_block(array, line_start)`, writing a tiled, compressed GeoTIFF with
+overviews and no CRS (L1B is in sensor coordinates).
 
-# Metadata Layer
-
-Responsible for metadata generation and catalog integration.
-
-### Responsibilities
-
-* Product metadata
-* Processing lineage
-* STAC generation
-
-### Interface
+### Pipeline — `pipeline/`
 
 ```python
-class MetadataBuilder:
-
-    def build(self):
-        pass
+class ProcessingPipeline(ABC):
+    def run(self) -> Product: ...
 ```
+
+`L1BPipeline` wires reader → calibrator → QA → writer and owns **only**
+orchestration and the windowing loop. Collaborators are injected, so each can be
+swapped or tested in isolation.
+
+### CLI — `cli/`
+
+`run_l1b` (`spp-l1b`) parses arguments, builds the pipeline, writes the band
+rasters + `qa_report.json` (+ optional quicklook) and returns an exit code driven
+by the QA result.
 
 ---
 
-# Pipeline Layer
+## Core data model — `core/`
 
-Coordinates all processing steps.
+Pure dataclasses, no raster-library dependency, no sensor proper nouns.
 
-### Responsibilities
+| Entity | Role |
+|---|---|
+| `Band` | One spectral band — **lazy**: path + raster properties, never pixels. |
+| `Acquisition` | The package as a domain object: bands + calibration + imager config + telemetry. |
+| `ImagerConfiguration` | Per-acquisition imager settings (line period, per-band TDI/start row/CWL). |
+| `RadiometricCalibration` | Coefficients for one `(band, start_row, tdi)`. |
+| `CalibrationParameters` | Calibration collection with `lookup(band, start_row, tdi)`; retains the geometric block for L1C. |
+| `Product` | Generated product described **by reference** (output paths) + metadata + provenance. |
 
-* Execute processing workflow
-* Track processing status
-* Generate logs
-
-### Interface
-
-```python
-class ProcessingPipeline:
-
-    def run(self):
-        pass
-```
+The physics lives in the calibrator, not the entities — the core stays a pure
+data layer.
 
 ---
 
-# Data Model
+## Design principles
 
-## Acquisition
-
-Represents raw instrument data.
-
-```python
-@dataclass
-class Acquisition:
-
-    image: np.ndarray
-    metadata: dict
-```
-
----
-
-## CalibrationModel
-
-Represents sensor calibration information.
-
-```python
-@dataclass
-class CalibrationModel:
-
-    gain: float
-    offset: float
-```
-
-Future implementations may support:
-
-```python
-gain_per_band
-offset_per_band
-dark_reference
-flat_field
-spectral_response
-```
+- **Separation of concerns** — reader, calibrator, QA, writer, pipeline are
+  independent and individually testable.
+- **Sensor-agnostic core** — entities carry no mission/sensor constants; the
+  radiometric model is swappable behind the `Calibrator` interface (see
+  [`generalisation.md`](generalisation.md)).
+- **Streaming I/O** — large rasters are processed in windows; memory stays flat
+  (see [`performance.md`](performance.md)).
+- **Reproducibility** — deterministic outputs; every run emits a QA report.
+- **No premature abstraction** — only the seams that earn their keep today exist;
+  future layers (geolocation, atmospheric, catalogue) are specified, not stubbed.
 
 ---
 
-## Product
-
-Represents a generated processing product.
-
-```python
-@dataclass
-class Product:
-
-    level: str
-    image: np.ndarray
-    metadata: dict
-```
-
----
-
-# Processing Flow
-
-## L0 → L1A
-
-Input:
-
-```text
-Raw acquisition
-```
-
-Output:
-
-```text
-Detector counts
-```
-
-Responsibilities:
-
-* unpacking
-* ordering
-* integrity checks
-
----
-
-## L1A → L1B
-
-Input:
-
-```text
-Detector counts
-Calibration assets
-```
-
-Output:
-
-```text
-Radiance product
-```
-
-Responsibilities:
-
-1. Dark current correction
-2. Offset correction
-3. Gain correction
-4. Radiance conversion
-5. QA generation
-
----
-
-## Future L1B → L1C
-
-Input:
-
-```text
-Radiance product
-DEM
-Attitude data
-Ephemeris
-```
-
-Output:
-
-```text
-Georeferenced radiance
-```
-
-Candidate libraries:
-
-* GDAL
-* Rasterio
-
----
-
-## Future L1C → L2
-
-Input:
-
-```text
-Georeferenced radiance
-Atmospheric parameters
-```
-
-Output:
-
-```text
-Surface reflectance
-```
-
-Candidate libraries:
-
-* Py6S
-* Acolite
-
----
-
-# Configuration Strategy
-
-All mission-specific parameters should live outside the processing code.
-
-Example:
-
-```yaml
-sensor:
-  name: example_sensor
-
-bands:
-  - blue
-  - green
-  - red
-  - nir
-
-calibration:
-  gain: 0.01
-  offset: 12
-```
-
-This allows new missions to be supported through configuration rather than code changes.
-
----
-
-# Testing Strategy
-
-Unit Tests
-
-* Reader tests
-* Calibration tests
-* QA tests
-* Metadata tests
-
-Integration Tests
-
-* End-to-end L0 → L1B
-
-Validation Tests
-
-* Radiometric sanity checks
-* Histogram verification
-* Product consistency checks
-
----
-
-# Future Extensions
-
-Potential roadmap:
-
-Phase 1
-
-* L1B implementation
-
-Phase 2
-
-* STAC catalog support
-
-Phase 3
-
-* L1C orthorectification
-
-Phase 4
-
-* L2 atmospheric correction
-
-Phase 5
-
-* Multi-sensor support
-
-Phase 6
-
-* Distributed processing with Dask
-
----
-
-# Architectural References
-
-The architecture is inspired by concepts commonly used in operational EO processing systems, including:
-
-* CEOS Product Levels
-* STAC
-* SatPy
-* Pygac
-* GDAL ecosystem
-
-The implementation intentionally favors lightweight, transparent, and sensor-agnostic components over large mission-specific frameworks.
+## Future stages
+
+`L1C` (geolocation) and `L2A` (surface reflectance) are specified in
+[`remaining_levels.md`](remaining_levels.md). They slot in as additional
+`Calibrator`/pipeline implementations consuming the same `Acquisition` plus their
+external data (DEM, atmospheric state); the reader already retains the geometric
+calibration and ancillary telemetry they need.

@@ -134,6 +134,7 @@ satellite-processing-pipeline/
 | [validation_strategy.md](docs/validation_strategy.md) | How correctness is established |
 | [qa_report.md](docs/qa_report.md) | `qa_report.json` schema: metrics, flags, thresholds |
 | [generalisation.md](docs/generalisation.md) | Adapting to a new mission |
+| [performance.md](docs/performance.md) | Processing large strips: memory & performance |
 | [input_package.md](docs/input_package.md) | Expected input package layout |
 | [references.md](docs/references.md) | Standards and tooling references |
 
