@@ -1,319 +1,154 @@
 # Satellite Processing Pipeline
 
-A modular Earth Observation (EO) processing framework designed to transform raw satellite payload acquisitions into analysis-ready products through configurable Level-0 to Level-2 processing chains.
+A modular, sensor-agnostic Earth Observation processing framework that turns raw
+multispectral payload acquisitions into calibrated products through a transparent
+L0 → L2 processing chain.
 
-The project focuses on building transparent, reproducible, and sensor-agnostic processing workflows that can be adapted to different satellite missions, calibration models, spectral configurations, and geospatial reference systems.
-
----
-
-## Features
-
-* Modular processing architecture
-* Sensor-agnostic design
-* Radiometric calibration workflows
-* Product-level abstraction (L0 → L2)
-* Quality Assurance (QA) framework
-* STAC-compatible metadata generation
-* Extensible processing pipeline
-* Reproducible scientific workflows
+The framework implements the **L1B transition end-to-end** — radiometric
+calibration of raw digital numbers (DN) to top-of-atmosphere (TOA) spectral
+radiance — and specifies the remaining levels (L1A, L1C, L2A) in detail. It is
+designed to read as a reusable EO tool: sensor-specific knowledge lives in the
+data it discovers and in a swappable calibration model, not hard-coded in the
+processing engine.
 
 ---
 
-## Processing Levels
+## Processing levels
 
-### Level 0 (Raw Acquisition)
+| Level | Output | Status |
+|------|--------|--------|
+| L0 / L1A | Per-band DN rasters (sensor coords) | Ingested |
+| **L1B** | **TOA spectral radiance** | **Implemented** |
+| L1C | Georeferenced radiance | Specified |
+| L2A | Surface reflectance | Specified |
 
-Raw payload data as received from the instrument.
-
-Typical operations:
-
-* Data ingestion
-* Integrity checks
-* Metadata extraction
-* Packet reconstruction
-
-Output:
-
-```text
-Raw acquisition package
-```
-
----
-
-### Level 1A
-
-Instrument data organized into detector counts and acquisition structures.
-
-Typical operations:
-
-* Decompression
-* Line reconstruction
-* Detector organization
-* Missing data detection
-
-Output:
-
-```text
-Detector counts
-```
-
----
-
-### Level 1B
-
-Radiometrically calibrated imagery.
-
-Typical operations:
-
-* Dark current correction
-* Offset correction
-* Gain correction
-* Conversion from digital numbers to radiance
-* QA flag generation
-
-Output:
-
-```text
-Top-of-Atmosphere Radiance
-```
-
----
-
-### Level 1C
-
-Geometrically corrected imagery.
-
-Typical operations:
-
-* Georeferencing
-* Orthorectification
-* Terrain correction
-* Reprojection
-
-Output:
-
-```text
-Georeferenced radiance product
-```
-
----
-
-### Level 2
-
-Surface-derived geophysical products.
-
-Typical operations:
-
-* Atmospheric correction
-* Reflectance generation
-* Environmental retrievals
-
-Output:
-
-```text
-Surface Reflectance
-Derived Products
-```
-
----
-
-## Repository Structure
-
-```text
-satellite-processing-pipeline/
-
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-│
-├── configs/
-│   ├── sensor_template.yaml
-│   └── processing_levels.yaml
-│
-├── data/
-│   ├── raw/
-│   ├── calibration/
-│   └── external/
-│
-├── docs/
-│   ├── architecture.md
-│   ├── product_hierarchy.md
-│   ├── decision_log.md
-│   ├── validation_strategy.md
-│   └── references.md
-│
-├── outputs/
-│   ├── l1b/
-│   ├── qa/
-│   └── quicklooks/
-│
-├── src/
-│   └── spp/
-│
-│       ├── readers/
-│       ├── calibration/
-│       ├── geolocation/
-│       ├── atmospheric/
-│       ├── products/
-│       ├── metadata/
-│       ├── qa/
-│       ├── pipeline/
-│       └── utils/
-│
-├── scripts/
-│
-└── tests/
-```
+See [`docs/product_hierarchy.md`](docs/product_hierarchy.md) for the full
+hierarchy and [`docs/remaining_levels.md`](docs/remaining_levels.md) for the
+levels not yet implemented.
 
 ---
 
 ## Installation
 
-Create a virtual environment:
+Requires Python 3.11+.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
 pip install -r requirements.txt
+pip install -e .            # installs the `spp-l1b` command
 ```
+
+Core dependencies: `numpy`, `rasterio`. Quicklook generation additionally needs
+`matplotlib` (`pip install -e '.[viz]'`).
 
 ---
 
-## Core Dependencies
+## How to run
 
-```text
-numpy
-rasterio
-xarray
-dask
-pystac
-matplotlib
-pyyaml
-pytest
-```
-
-Optional:
-
-```text
-gdal
-py6s
-```
-
----
-
-## Example Workflow
-
-Run a Level-1B calibration:
+Calibrate an acquisition package to L1B radiance:
 
 ```bash
-python scripts/run_l1b.py \
-    --input data/raw/acquisition \
-    --calibration data/calibration \
-    --output outputs/l1b
+spp-l1b --input  /path/to/acquisition_package \
+        --output /path/to/output_dir \
+        --quicklook
 ```
 
-Generate QA products:
+Or without installing:
 
 ```bash
-python scripts/generate_quicklook.py
+PYTHONPATH=src python -m spp.cli.run_l1b --input <package> --output <out>
 ```
 
+### Expected input
+
+An acquisition package directory containing:
+
+- one GeoTIFF per spectral band (`uint16` DN),
+- `metadata.json` (imager configuration + detector telemetry),
+- `ancillary.json` (platform telemetry — used by later levels),
+- a STAC item describing the product,
+- `calibration/` with the Calibration Parameter File, spectral filters and the
+  solar reference.
+
+See [`docs/input_package.md`](docs/input_package.md) for the layout. Band files
+and calibration assets are **discovered** (via the STAC assets and glob
+patterns), so exact file names are not hard-coded.
+
+### Outputs
+
+Written to the output directory:
+
+- `<BAND>.tif` — one `float32` TOA radiance raster per band
+  (`W / (m² · sr · nm)`), tiled with internal overviews, NoData = NaN, no CRS
+  (L1B is still in sensor coordinates);
+- `qa_report.json` — per-band statistics and quality flags;
+- `quicklook.png` — RGB preview (with `--quicklook`).
+
+### Options
+
+| Flag | Meaning |
+|---|---|
+| `--bands B G R ...` | Process a subset of bands (default: all) |
+| `--window-lines N` | Along-track lines per processing window (default 2048) |
+| `--saturation-dn N` | Flag DN ≥ N as saturated (default: off) |
+| `--quicklook` | Also write an RGB quicklook PNG |
+| `--quiet` | Only print the final summary |
+
+### Approximate runtime
+
+A full 8-band acquisition of ~4096 × 31000 pixels processes in **~2 minutes** on
+a laptop, producing ~4 GB of `float32` output. Memory stays flat (windowed
+streaming), independent of raster size.
+
 ---
 
-## Design Principles
-
-### Sensor Agnostic
-
-Mission-specific parameters should be externalized into configuration files.
-
-Examples:
-
-* Spectral bands
-* Calibration coefficients
-* Detector geometry
-* Metadata mappings
-* Coordinate reference systems
-
----
-
-### Reproducibility
-
-All processing steps should be:
-
-* deterministic
-* documented
-* version controlled
-
----
-
-### Transparency
-
-Each processing level should clearly define:
-
-* inputs
-* outputs
-* assumptions
-* limitations
-* validation strategy
-
----
-
-## Quality Assurance
-
-Recommended QA checks:
-
-* Missing calibration coefficients
-* Invalid radiance values
-* Saturated pixels
-* Histogram anomalies
-* Metadata consistency checks
-
-Outputs should include:
+## Repository structure
 
 ```text
-QA report
-Quicklook imagery
-Processing log
+satellite-processing-pipeline/
+├── src/spp/
+│   ├── core/          # domain entities (Band, Acquisition, Calibration, Product)
+│   ├── readers/       # package discovery and parsing -> Acquisition
+│   ├── calibration/   # radiometric calibration (L1B)
+│   ├── qa/            # quality assessment + quicklook
+│   ├── products/      # raster writers (GeoTIFF)
+│   ├── pipeline/      # orchestration (L1B pipeline)
+│   └── cli/           # command-line entry points
+├── docs/              # product hierarchy, decisions, specs, validation
+├── pyproject.toml
+└── requirements.txt
 ```
 
 ---
 
-## Future Work
+## Documentation
 
-Potential future extensions include:
-
-* Orthorectification workflows
-* Atmospheric correction
-* BRDF correction
-* STAC catalog generation
-* Cloud-native GeoTIFF support
-* Distributed processing with Dask
-* Multi-sensor support
+| Document | Contents |
+|---|---|
+| [architecture.md](docs/architecture.md) | Component design and data flow |
+| [product_hierarchy.md](docs/product_hierarchy.md) | L0→L2 levels: inputs, outputs, justification |
+| [remaining_levels.md](docs/remaining_levels.md) | Specs for L1A, L1C, L2A |
+| [decision_log.md](docs/decision_log.md) | Engineering decisions and trade-offs |
+| [limitations.md](docs/limitations.md) | Failure modes and next steps |
+| [validation_strategy.md](docs/validation_strategy.md) | How correctness is established |
+| [generalisation.md](docs/generalisation.md) | Adapting to a new mission |
+| [input_package.md](docs/input_package.md) | Expected input package layout |
+| [references.md](docs/references.md) | Standards and tooling references |
 
 ---
 
-## References
+## Design principles
 
-* CEOS Product Levels
-* STAC Specification
-* GDAL
-* Rasterio
-* PySTAC
-* SatPy
-* Pygac
-* Copernicus DEM
-* Py6S
+- **Separation of concerns** — reader, calibrator, QA, writer, pipeline are
+  independent and individually testable.
+- **Sensor-agnostic core** — entities carry no mission/sensor constants; the
+  radiometric model is swappable behind an interface.
+- **Streaming I/O** — large rasters are processed in windows; memory stays flat.
+- **Reproducibility** — deterministic outputs; every run emits a QA report.
 
 ---
 
 ## License
 
-MIT License
-
-```
-```
+MIT License.

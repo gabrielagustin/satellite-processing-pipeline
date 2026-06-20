@@ -1,23 +1,41 @@
 # References
 
-## Standards and Product Definitions
+Standards, conventions and tooling consulted while building this framework.
 
-### Committee on Earth Observation Satellites (CEOS)
+## Standards & product definitions
 
-CEOS provides internationally recognized guidance and conventions for Earth Observation data products and processing levels.
+- **CEOS — Committee on Earth Observation Satellites.** Conventions for EO
+  product levels, traceable processing chains, and calibration/validation
+  practice. <https://ceos.org>
+- **STAC — SpatioTemporal Asset Catalog.** Product and catalogue metadata model;
+  the input package's item is a STAC 1.1 item. <https://stacspec.org>
 
-Reference:
-https://ceos.org
+## Data handling & raster I/O
 
-Relevant concepts used in this project:
+- **Rasterio** — windowed raster I/O, overviews, GeoTIFF/COG writing.
+  <https://rasterio.readthedocs.io>
+- **GDAL / OGR** — underlying raster/vector engine; warp, VRT, COG.
+  <https://gdal.org>
+- **NumPy** — array computation for the calibration chain.
+  <https://numpy.org>
+- **Cloud-Optimized GeoTIFF (COG)** — tiled + overview raster layout.
+  <https://www.cogeo.org>
 
-* Product Level Hierarchies
-* Traceable Processing Chains
-* Calibration and Validation Practices
+## Geometric reference (L1C)
 
----
+- **Copernicus DEM** — elevation reference for terrain correction.
+  <https://spacedata.copernicus.eu>
+- **GDAL warp / VRT** — resampling onto a target CRS/grid.
+  <https://gdal.org>
 
-### SpatioTemporal Asset Catalog (STAC)
+## Atmospheric reference (L2A)
 
-Reference:
-https://stacspec.org
+- **6S / Py6S** — atmospheric radiative-transfer model and Python interface.
+  <https://py6s.readthedocs.io>, <https://6s.ltdri.org>
+- **ACOLITE** — atmospheric correction for aquatic scenes.
+  <https://github.com/acolite>
+
+## Visualisation & QA
+
+- **Matplotlib** — RGB quicklook output. <https://matplotlib.org>
+- **QGIS** — visual inspection of rasters. <https://qgis.org>
