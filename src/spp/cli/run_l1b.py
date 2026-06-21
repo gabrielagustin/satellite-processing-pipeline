@@ -53,6 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also write an RGB quicklook PNG (needs the R, G, B bands).",
     )
     parser.add_argument(
+        "--stac", action=argparse.BooleanOptionalAction, default=True,
+        help="Write a STAC item describing the product (default: on).",
+    )
+    parser.add_argument(
         "--quiet", "-q", action="store_true",
         help="Only print the final summary.",
     )
@@ -83,14 +87,16 @@ def main(argv: list[str] | None = None) -> int:
     report_path = args.output / "qa_report.json"
     report_path.write_text(json.dumps(qa, indent=2))
 
-    if args.quicklook:
-        _write_quicklook(product, args.output)
+    quicklook_path = _write_quicklook(product, args.output) if args.quicklook else None
+
+    if args.stac:
+        _write_stac(product, args.output, quicklook_path, report_path)
 
     _print_summary(product, report_path)
     return 0 if qa["passed"] else 1
 
 
-def _write_quicklook(product, output_dir: Path) -> None:
+def _write_quicklook(product, output_dir: Path) -> Path | None:
     from spp.qa.quicklook import write_quicklook
 
     required = ("R", "G", "B")
@@ -98,9 +104,25 @@ def _write_quicklook(product, output_dir: Path) -> None:
         logging.getLogger(__name__).warning(
             "Skipping quicklook: needs bands %s", required
         )
-        return
+        return None
     path = write_quicklook(product.bands, output_dir / "quicklook.png")
     logging.getLogger(__name__).info("Wrote quicklook %s", path)
+    return path
+
+
+def _write_stac(
+    product, output_dir: Path, quicklook_path: Path | None, report_path: Path
+) -> None:
+    from spp.products.stac_writer import write_stac_item
+
+    item_path = output_dir / f"{product.scene_id}_{product.level}.json"
+    path = write_stac_item(
+        product,
+        item_path,
+        quicklook_href=quicklook_path.name if quicklook_path else None,
+        qa_href=report_path.name,
+    )
+    logging.getLogger(__name__).info("Wrote STAC item %s", path)
 
 
 def _print_summary(product, report_path: Path) -> None:

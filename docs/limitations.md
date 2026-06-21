@@ -84,8 +84,6 @@ naive statistics) can propagate it or skew results.
   from the provided solar + filter assets and emit TOA reflectance.
 - **L1C prototype.** Implement the line-of-sight + ephemeris/attitude + DEM
   geolocation, with GCP refinement to compensate for the absent GNSS lock.
-- **STAC output.** Emit a STAC item for the L1B product (metadata/catalogue
-  layer) for interoperability.
 - **Sensor profiles via config.** Externalise per-sensor parameters into config
   files so a new mission is onboarded without code changes.
 - **Parallelism.** Bands are independent — process them concurrently

@@ -99,6 +99,13 @@ class L1BPipeline(ProcessingPipeline):
             product.bands[name] = path
 
         product.metadata.update(self._build_metadata(acquisition, calibrator))
+        product.metadata["bands"] = {
+            name: {
+                "cwl_nm": acquisition.band(name).cwl_nm,
+                "band_id": acquisition.band(name).band_id,
+            }
+            for name in band_names
+        }
         product.metadata["qa"] = self.validator.summarise(
             band_reports, scene_id=acquisition.scene_id, level=self.LEVEL
         )

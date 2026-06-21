@@ -132,3 +132,21 @@ proper nouns.
 **Trade-offs.** Slightly more discovery logic, but the framework reads as a
 reusable EO tool and adapts to a new sensor through data, not code edits (see
 [`generalisation.md`](generalisation.md)).
+
+---
+
+## 10. Emit a STAC item for the L1B product, with `null` geometry
+
+**Alternatives.** Ship only the rasters + a QA report; or fabricate a footprint
+on the output item by carrying the source scene's `bbox`/`geometry`.
+
+**Choice.** Write a STAC 1.0.0 item per product (eo/raster/processing
+extensions): band assets with spectral/raster properties, processing lineage
+(software version, `derived_from` the source scene), quicklook and QA as assets.
+The geometry is `null` because L1B is still in sensor coordinates.
+
+**Trade-offs.** A real footprint would make the item map-discoverable, but L1B is
+**not georeferenced** — asserting a geometry would be misleading; an honest
+`null` geometry defers that to L1C. The item adds negligible runtime and makes
+the product catalogue-ready and interoperable; it is on by default (`--no-stac`
+to skip).

@@ -83,6 +83,9 @@ Written to the output directory:
   (`W / (m² · sr · nm)`), tiled with internal overviews, NoData = NaN, no CRS
   (L1B is still in sensor coordinates);
 - `qa_report.json` — per-band statistics and quality flags;
+- `<scene_id>_L1B.json` — a STAC item cataloguing the product (band assets,
+  spectral/raster properties, processing lineage; `geometry` is `null` because
+  L1B is not yet georeferenced). On by default; disable with `--no-stac`;
 - `quicklook.png` — RGB preview (with `--quicklook`).
 
 ### Options
@@ -93,6 +96,7 @@ Written to the output directory:
 | `--window-lines N` | Along-track lines per processing window (default 2048) |
 | `--saturation-dn N` | Flag DN ≥ N as saturated (default: off) |
 | `--quicklook` | Also write an RGB quicklook PNG |
+| `--stac` / `--no-stac` | Write a STAC item for the product (default: on) |
 | `--quiet` | Only print the final summary |
 
 ### Approximate runtime
