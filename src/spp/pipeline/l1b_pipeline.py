@@ -18,6 +18,7 @@ import rasterio
 from rasterio.errors import NotGeoreferencedWarning
 from rasterio.windows import Window
 
+from spp import __version__ as spp_version
 from spp.calibration.l1b_calibrator import L1BCalibrator
 from spp.core.acquisition import Acquisition
 from spp.core.product import Product
@@ -175,6 +176,7 @@ class L1BPipeline(ProcessingPipeline):
         cal = acquisition.calibration
         return {
             "source_scene_id": acquisition.scene_id,
+            "software": {"name": "spp", "version": spp_version},
             "calibration_uuids": {
                 r.band: r.uuid for r in cal.radiometric
             },
