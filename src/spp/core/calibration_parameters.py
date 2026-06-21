@@ -90,24 +90,6 @@ class CalibrationParameters:
     radiometric: list[RadiometricCalibration]
     geometric: dict | None = None
 
-    def for_band(self, band: str) -> RadiometricCalibration:
-        """Return the (single) radiometric entry for ``band``.
-
-        Raises
-        ------
-        KeyError
-            If no entry, or more than one entry, matches ``band``.
-        """
-        matches = [r for r in self.radiometric if r.band == band]
-        if not matches:
-            raise KeyError(f"No radiometric calibration entry for band {band!r}")
-        if len(matches) > 1:
-            raise KeyError(
-                f"Ambiguous calibration for band {band!r}: {len(matches)} entries; "
-                f"use lookup(band, start_row, tdi) to disambiguate"
-            )
-        return matches[0]
-
     def lookup(self, band: str, start_row: int, tdi: int) -> RadiometricCalibration:
         """Return the radiometric entry matching ``(band, start_row, tdi)``.
 

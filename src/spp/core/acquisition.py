@@ -40,7 +40,7 @@ class ImagerConfiguration:
     spectral_bands: int
     band_setup: list[int]
     band_start_row: list[int]
-    band_cwl: list[int]
+    band_cwl: list[float]
     scan_direction: int
     binning_factor: int
 
