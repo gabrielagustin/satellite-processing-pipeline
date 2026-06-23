@@ -114,7 +114,7 @@ Pure dataclasses, no raster-library dependency, no sensor proper nouns.
 |---|---|
 | `Band` | One spectral band — **lazy**: path + raster properties, never pixels. |
 | `Acquisition` | The package as a domain object: bands + calibration + imager config + telemetry. |
-| `ImagerConfiguration` | Per-acquisition imager settings (line period, per-band TDI/start row/CWL). |
+| `ImagerConfiguration` | Per-acquisition imager settings (line period, per-band TDI/start row/CWL — central wavelength). |
 | `RadiometricCalibration` | Coefficients for one `(band, start_row, tdi)`. |
 | `CalibrationParameters` | Calibration collection with `lookup(band, start_row, tdi)`; retains the geometric block for L1C. |
 | `Product` | Generated product described **by reference** (output paths) + metadata + provenance. |

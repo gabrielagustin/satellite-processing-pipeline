@@ -39,3 +39,36 @@ Standards, conventions and tooling consulted while building this framework.
 
 - **Matplotlib** — RGB quicklook output. <https://matplotlib.org>
 - **QGIS** — visual inspection of rasters. <https://qgis.org>
+
+## Acronyms
+
+Acronyms used across the documentation, in one place.
+
+| Acronym | Expansion |
+|---|---|
+| ADC | Analogue-to-Digital Converter |
+| AOD | Aerosol Optical Depth |
+| CEOS | Committee on Earth Observation Satellites |
+| CIS | CMOS Image Sensor |
+| COG | Cloud-Optimized GeoTIFF |
+| CPF | Calibration Parameter File |
+| CRC | Cyclic Redundancy Check |
+| CRS | Coordinate Reference System |
+| CWL | Central Wavelength |
+| DEM | Digital Elevation Model |
+| DN | Digital Number (raw detector count) |
+| ECEF | Earth-Centred, Earth-Fixed (coordinate frame) |
+| EO | Earth Observation / Electro-Optical (STAC extension) |
+| ESUN | Exo-atmospheric Solar Irradiance (band-mean solar irradiance) |
+| GNSS | Global Navigation Satellite System |
+| GSD | Ground Sample Distance |
+| LoS | Line of Sight |
+| NIR | Near Infrared |
+| PAN | Panchromatic |
+| RSR | Relative Spectral Response |
+| SLERP | Spherical Linear Interpolation (of quaternions) |
+| STAC | SpatioTemporal Asset Catalog |
+| SWIR | Short-Wave Infrared |
+| TDI | Time-Delay Integration |
+| TOA | Top of Atmosphere |
+| VNIR | Visible and Near Infrared |

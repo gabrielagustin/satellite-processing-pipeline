@@ -19,8 +19,8 @@ acquisition_package/
 ├── ancillary.json
 │
 ├── calibration/
-│   ├── calibration_parameters.json
-│   ├── filter_definitions.json
+│   ├── CPF_*.json              # calibration parameter file (matched by CPF*.json)
+│   ├── filters_*.json          # spectral filter definitions (matched by filters*.json)
 │   └── solar/
 │       ├── spectral_solar.json
 │       └── temporal_solar.json
@@ -40,6 +40,15 @@ Band data are delivered as individual TIFF files.
 Calibration and ancillary information are provided as JSON documents. The solar
 reference (`spectral_solar.json`, `temporal_solar.json`) lives under
 `calibration/solar/`; it is consumed by reflectance-level processing, not by L1B.
+
+Inside `calibration/`, the reader locates the two documents by **glob pattern**,
+not by an exact name, so payload-specific suffixes do not need to be hard-coded:
+
+* the calibration parameter file (CPF) is matched by `CPF*.json`;
+* the spectral filter definitions are matched by `filters*.json`.
+
+The first match for each pattern is used (and a missing match raises a clear
+error). The filter file provides the authoritative band-name↔detector-id map.
 
 The STAC item at the package root carries the scene identity and the band asset
 table, which is the reader's primary source for discovering the band rasters; it

@@ -2,14 +2,15 @@
 
 This document specifies the Earth Observation product levels this framework
 targets, from raw acquisition (L0) up to surface products (L2). The hierarchy
-follows the CEOS processing-level conventions and is written for a generic
+follows the CEOS (Committee on Earth Observation Satellites) processing-level
+conventions and is written for a generic
 multispectral **pushbroom (linescan)** imager with the following characteristics
 (the values are those of the reference acquisition used to develop the
 framework):
 
 - **8 spectral bands** — one panchromatic plus blue, green, red, three red-edge
   and a near-infrared band (VNIR, ~490–842 nm).
-- A single-frame **CIS detector** read out in linescan mode, with per-band
+- A single-frame **CIS (CMOS Image Sensor) detector** read out in linescan mode, with per-band
   **Time-Delay Integration (TDI)** and a per-band detector **start row**.
 - Cross-track width of 4096 detector columns; along-track dimension built up over
   time (one raster row per readout line).
@@ -51,7 +52,8 @@ no image structure imposed.
 **Output.** Byte-faithful raw packets in archival storage; no per-band imagery.
 
 **Processing steps.**
-1. Demultiplex the downlink stream; verify frame/packet integrity (CRC).
+1. Demultiplex the downlink stream; verify frame/packet integrity (CRC — cyclic
+   redundancy check).
 2. Extract session metadata (imager configuration, telemetry, timing).
 3. Persist the raw binary and metadata unchanged for traceability.
 
@@ -96,7 +98,8 @@ radiance**, still in sensor coordinates.
 
 **Input.**
 - L1A per-band DN rasters.
-- Radiometric calibration (CPF): per `(band, start_row, tdi)` an absolute scale,
+- Radiometric calibration (CPF — Calibration Parameter File): per
+  `(band, start_row, tdi)` an absolute scale,
   an optional offset, and three per-column arrays — non-uniformity,
   thermal-intercept and thermal-gradient.
 - Per-line detector temperature telemetry.
@@ -162,7 +165,8 @@ ground space and stackable with other geodata. It depends on **external data**
 **Definition.** Atmospherically corrected **surface reflectance** (bottom-of-
 atmosphere), the analysis-ready geophysical product.
 
-**Input.** L1C radiance; band-averaged solar irradiance (ESUN) from the solar
+**Input.** L1C radiance; band-averaged solar irradiance (ESUN — exo-atmospheric
+solar irradiance) from the solar
 reference and the per-band spectral response; sun/view geometry; an atmospheric
 model (aerosol optical depth, water vapour, ozone); DEM.
 

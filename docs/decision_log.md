@@ -110,9 +110,9 @@ output size and memory.
 
 **Alternatives.** NetCDF; a single multiband file; no overviews.
 
-**Choice.** One COG-friendly GeoTIFF per band: tiled (512), compressed with a
-floating-point predictor, internal overviews, **no CRS** (L1B is still in sensor
-coordinates).
+**Choice.** One COG-friendly (Cloud-Optimized GeoTIFF) GeoTIFF per band: tiled
+(512), compressed with a floating-point predictor, internal overviews, **no CRS**
+(L1B is still in sensor coordinates).
 
 **Trade-offs.** GeoTIFF + GDAL ecosystem is the most interoperable choice for
 downstream geometric processing; per-band files keep the model simple and match
