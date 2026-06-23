@@ -76,6 +76,12 @@ class Acquisition:
         Detector temperature telemetry samples (degrees, as stored). Used to
         evaluate the temperature-dependent darkfield. May be coarsely sampled
         (one value per telemetry tick, not per line).
+    temperature_sample_lines:
+        Along-track line index (fractional) of each detector-temperature sample,
+        derived from the sample timestamps and the per-line timing. Parallel to
+        :attr:`sensor_temperatures`. ``None`` when timing information is
+        unavailable, in which case downstream stages fall back to spreading the
+        samples uniformly across the lines.
     acquired_at:
         Acquisition datetime in ISO-8601 UTC, if known.
     metadata:
@@ -91,6 +97,7 @@ class Acquisition:
     calibration: CalibrationParameters
     imager_config: ImagerConfiguration
     sensor_temperatures: np.ndarray = field(repr=False)
+    temperature_sample_lines: np.ndarray | None = field(default=None, repr=False)
     acquired_at: str | None = None
     metadata: dict = field(default_factory=dict, repr=False)
     ancillary: dict = field(default_factory=dict, repr=False)
