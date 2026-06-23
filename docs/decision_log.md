@@ -150,3 +150,13 @@ The geometry is `null` because L1B is still in sensor coordinates.
 `null` geometry defers that to L1C. The item adds negligible runtime and makes
 the product catalogue-ready and interoperable; it is on by default (`--no-stac`
 to skip).
+
+> **Documented alternative (discoverability).** The source package's STAC item
+> *does* carry a **nominal scene footprint** (the planned `bbox`/`geometry`).
+> That outline could be propagated to the L1B item to make the product findable
+> on a map, **provided it is explicitly labelled as nominal** — a planning-grade
+> outline, not a pixel-accurate footprint — since the assets remain in sensor
+> coordinates and this scene has no GNSS lock (so even the nominal outline is
+> approximate). This is a legitimate choice when catalogue discoverability is
+> prioritised over strict rigour; it would be a deliberate, documented toggle,
+> never a silent default. We keep `null` here as the more rigorous default.
