@@ -161,7 +161,13 @@ class PackageReader(Reader):
                 start_row=entry["row"],
                 tdi=entry["tdi"],
                 absolute=float(entry["absolute"]),
-                absolute_offset=float(entry.get("absolute_offset", 0.0)),
+                # The absolute offset is optional: the reference CPF omits the
+                # key entirely (offset = 0), but other CPFs may carry it as an
+                # explicit JSON ``null``. ``dict.get`` only substitutes the
+                # default for a *missing* key, so a present-but-null value would
+                # otherwise reach ``float(None)`` and raise. ``_optional_float``
+                # treats both missing and null as "no offset".
+                absolute_offset=self._optional_float(entry.get("absolute_offset")),
                 non_uniformity=np.asarray(entry["coefficients"][0], dtype=np.float64),
                 thermal_intercept=np.asarray(entry["coefficients"][1], dtype=np.float64),
                 thermal_gradient=np.asarray(entry["coefficients"][2], dtype=np.float64),
@@ -335,6 +341,19 @@ class PackageReader(Reader):
                 except (TypeError, ValueError):
                     return 0.0
         return 0.0
+
+    @staticmethod
+    def _optional_float(value: object, default: float = 0.0) -> float:
+        """Coerce an optional CPF numeric field to ``float``.
+
+        A field such as the absolute offset may be **absent** from a CPF entry or
+        present as an explicit JSON ``null``; both mean "not specified" and map to
+        ``default``. Any other value is converted with ``float`` so a malformed
+        (non-numeric) value still fails loudly rather than silently.
+        """
+        if value is None:
+            return default
+        return float(value)
 
     @staticmethod
     def _scene_identity(stac: dict | None) -> tuple[str, str | None]:

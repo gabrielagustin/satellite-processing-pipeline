@@ -104,16 +104,18 @@ radiance**, still in sensor coordinates.
   thermal-intercept and thermal-gradient.
 - Per-line detector temperature telemetry.
 
-**Output.** One `float32` radiance raster per band (units `W / (m² · sr · nm)`),
+**Output.** One `float32` radiance raster per band (units `W / (m² · sr · µm)`),
 NoData = NaN, no CRS; a per-band QA report; and a **STAC item** cataloguing the
 product (band assets, spectral/raster properties, processing lineage). The STAC
 item's geometry is `null` — L1B is not yet georeferenced.
 
 **Processing steps** (per band, applied per detector column `c` and line `ℓ`):
 1. **Temperature-dependent dark subtraction.** Build a per-line temperature
-   profile `T(ℓ)` by interpolating the telemetry, then
-   `darkfield(c, ℓ) = thermal_intercept[c] + thermal_gradient[c] · T(ℓ)` and
-   subtract it. This removes the dark-signal pedestal, which is present because
+   profile `T(ℓ)` by interpolating the telemetry samples **at their true line
+   positions** — each sample is placed from its `ImagerTime` timestamp via the
+   `TimeSync` clock anchor (a uniform fallback applies when timing is
+   unavailable). Then `darkfield(c, ℓ) = thermal_intercept[c] +
+   thermal_gradient[c] · T(ℓ)` and subtract it. This removes the dark-signal pedestal, which is present because
    on-detector electronic-black correction is disabled, and which drifts with
    detector temperature over the acquisition.
 2. **Non-uniformity (relative) correction.** Multiply by `non_uniformity[c]` to

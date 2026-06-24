@@ -80,7 +80,7 @@ patterns), so exact file names are not hard-coded.
 Written to the output directory:
 
 - `<BAND>.tif` — one `float32` TOA radiance raster per band
-  (`W / (m² · sr · nm)`), tiled with internal overviews, NoData = NaN, no CRS
+  (`W / (m² · sr · µm)`), tiled with internal overviews, NoData = NaN, no CRS
   (L1B is still in sensor coordinates);
 - `qa_report.json` — per-band statistics and quality flags;
 - `<scene_id>_L1B.json` — a STAC item cataloguing the product (band assets,
@@ -101,7 +101,7 @@ Written to the output directory:
 
 ### Approximate runtime
 
-A full 8-band acquisition of ~4096 × 31000 pixels processes in **~2 minutes** on
+A full 8-band acquisition of ~4096 × 31000 pixels processes in **~1–2 minutes** on
 a laptop, producing ~4 GB of `float32` output. Memory stays flat (windowed
 streaming), independent of raster size.
 

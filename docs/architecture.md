@@ -62,7 +62,9 @@ class Calibrator(ABC):
 `L1BCalibrator` converts a **block** of DN to at-aperture radiance. It is pure
 (NumPy in, NumPy out, no I/O); `line_start` lets along-track-varying terms (the
 temperature profile) be indexed correctly, which is what makes windowed
-processing exact.
+processing exact. The per-line temperature is interpolated at the sample line
+positions the reader resolves from the telemetry timestamps (`ImagerTime` via the
+`TimeSync` anchor), with a uniform-spacing fallback when timing is unavailable.
 
 ### Quality validator — `qa/`
 
