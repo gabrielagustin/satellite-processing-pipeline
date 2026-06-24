@@ -30,7 +30,7 @@ L0 ingest.)*
 - `SensorConfiguration` — ADC (Analogue-to-Digital Converter) range, readout offsets, gain, e-black flag.
 
 **Algorithm.**
-1. Parse the binary container; validate frame/packet CRCs; recover the readout
+1. Parse the binary container; validate frame/packet CRCs (cyclic redundancy checks); recover the readout
    line sequence with timestamps.
 2. Decompress the payload if compressed (a compression flag in the product
    metadata indicates the codec; `0` = none).
