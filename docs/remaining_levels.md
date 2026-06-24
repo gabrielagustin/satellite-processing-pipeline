@@ -147,12 +147,32 @@ external-data-intensive level.**
    model evaluated at the acquisition date (Earth–Sun distance `d`).
 2. **TOA reflectance.** `ρ_TOA = π · L · d² / (ESUN_b · cos θ_s)`, with `L` the
    L1C radiance and `θ_s` the solar zenith angle.
-3. **Atmospheric correction.** Run the RT model with the atmospheric state and
-   sun/view geometry to obtain path radiance, atmospheric transmittance (up/down)
-   and spherical albedo; invert to surface reflectance
+3. **Atmospheric correction.** Run the radiative-transfer (RT) model with the
+   atmospheric state and sun/view geometry to obtain path radiance, atmospheric
+   transmittance (up/down) and spherical albedo; invert to surface reflectance
    `ρ_s = f(ρ_TOA; xa, xb, xc)`. For aquatic scenes, use a water-optimised scheme
    (SWIR (Short-Wave Infrared)/NIR-based aerosol estimation; retrieve water-leaving reflectance).
 4. Mask clouds/cloud-shadow/sun-glint; write per-band surface reflectance.
+
+**Symbols (every term in the equations above).**
+- `b` — spectral band index; `λ` — wavelength.
+- `E_sun(λ)` — reference solar spectral irradiance at `λ` (from
+  `spectral_solar.json`).
+- `rsr_b(λ)` — relative spectral response of band `b` at `λ` (from
+  `filters_payload_0.json`).
+- `ESUN_b` — band-integrated exo-atmospheric solar irradiance for band `b`
+  (`W·m⁻²·nm⁻¹`); the response-weighted average of `E_sun` over the band.
+- `d` — Earth–Sun distance (astronomical units) at the acquisition date (from
+  `temporal_solar.json`); the `d²` term normalises for the seasonal Sun distance.
+- `L` — at-sensor (L1C) spectral radiance, `W·m⁻²·sr⁻¹·nm⁻¹`.
+- `θ_s` — solar zenith angle; `cos θ_s` corrects for the illumination geometry.
+- `π` — converts radiance (per steradian) to a (Lambertian) reflectance.
+- `ρ_TOA` — top-of-atmosphere (apparent) reflectance, unitless in `[0, 1]`.
+- `ρ_s` — surface (bottom-of-atmosphere) reflectance — the L2A output, unitless.
+- `xa, xb, xc` — the atmospheric-correction coefficients from the RT model
+  (6S convention): `xa` the inverse total transmittance/gain, `xb` the
+  path-radiance term, `xc` the atmospheric spherical albedo — combined as
+  `y = xa·L − xb`, then `ρ_s = y / (1 + xc·y)`.
 
 **Key challenges.**
 - **Aerosol retrieval** is the dominant uncertainty, especially over bright land

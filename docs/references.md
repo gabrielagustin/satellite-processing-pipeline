@@ -68,6 +68,7 @@ Acronyms used across the documentation, in one place.
 | PAN | Panchromatic |
 | RPC | Rational Polynomial Coefficients |
 | RSR | Relative Spectral Response |
+| RT | Radiative Transfer |
 | SLERP | Spherical Linear Interpolation (of quaternions) |
 | STAC | SpatioTemporal Asset Catalog |
 | SWIR | Short-Wave Infrared |
