@@ -39,9 +39,15 @@ and standard deviation as a single-shot computation, so the streamed QA is exact
 `high_nodata`, `negative_radiance`, `saturation`, `zero_dynamic_range`. The full
 per-band metric and flag schema is documented in [`qa_report.md`](qa_report.md).
 
-**Temperature line-timing.** Unit tests (`tests/test_temperature_timing.py`)
-cover the timestamp→line mapping, its uniform fallback, and the edge cases
-(missing timing, single sample). The impact was quantified on the real scene by
+**L1B calibration core.** Unit tests (`tests/test_l1b_calibrator.py`) pin the
+public `calibrate()` path: the documented DN→radiance formula (checked against an
+independent reference and hand-computed pixels), the windowed-`line_start`
+equivalence to the full frame that makes streaming exact, NoData masking, and the
+shape/bounds guards.
+
+**Temperature line-timing.** Unit tests cover the timestamp→line mapping
+(`tests/test_package_reader.py`), its uniform fallback and the edge cases
+(missing timing, single sample) (`tests/test_l1b_calibrator.py`). The impact was quantified on the real scene by
 comparing, for the R band, the **per-line mean TOA spectral radiance** (the L1B
 output quantity, `W·m⁻²·sr⁻¹·µm⁻¹`) under the timestamped vs uniform models: the
 band-mean radiance barely moves (39.38 vs 39.41) but the **along-track per-line
@@ -74,14 +80,14 @@ the expectation.
 
 ## Ongoing / recommended
 
-- **Unit tests** — a focused suite exists for the temperature-timing model;
-  extend per module with small synthetic fixtures (reader parsing, calibration
-  math, QA flags, writer round-trip).
+- **Unit tests** — a focused suite covers the L1B calibrator core and the
+  temperature-timing model; extend per module with small synthetic fixtures
+  (reader parsing, QA flags, writer round-trip).
 - **Integration test** on a small window, asserting against a stored reference.
 - **Regression fixtures** — pin `qa_report.json` summary metrics for the
   reference scene and diff on change.
-- **CI** — GitHub Actions runs `pytest` on every push/PR across Python
-  3.11–3.13 (`.github/workflows/ci.yml`); extend it as the suite grows.
+- **CI** — GitHub Actions runs `pytest -v` on every push/PR on Python 3.11
+  (`.github/workflows/ci.yml`); extend it as the suite grows.
 
 ---
 

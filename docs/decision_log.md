@@ -182,4 +182,5 @@ model mis-assigns temperature by up to ~15 °C, biasing per-line radiance by up 
 **~3.5 %** along-track (a banding gradient) while leaving the band **mean**
 almost unchanged — invisible to scalar QA. The timestamped model corrects it.
 Verified on the real scene (per-line radiance comparison) and covered by unit
-tests (`tests/test_temperature_timing.py`).
+tests (`tests/test_package_reader.py` for the timestamp→line mapping,
+`tests/test_l1b_calibrator.py` for the interpolation).

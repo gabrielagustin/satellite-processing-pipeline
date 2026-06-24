@@ -80,16 +80,17 @@ naive statistics) can propagate it or skew results.
 - **Single-acquisition oriented.** No batch/catalogue orchestration yet.
 - **Test coverage.** A unit suite (`tests/`) runs on every push/PR via GitHub
   Actions (see [`validation_strategy.md`](validation_strategy.md)), but it is
-  still narrow — it covers the temperature-timing model and a couple of reader
-  helpers, not yet every module.
+  still narrow — it covers the L1B calibrator core (the DN→radiance path), the
+  temperature-timing model and a couple of reader helpers, not yet every module.
 
 ---
 
 ## Reflection — what I would do next
 
-- **Broaden test coverage.** CI (GitHub Actions) and a focused unit suite are in
-  place; extend the suite per module (reader parsing, calibration math, QA flags,
-  writer round-trip) plus an integration test on a small window.
+- **Broaden test coverage.** CI (GitHub Actions) and a focused unit suite
+  (calibrator core + temperature timing) are in place; extend per module (reader
+  parsing, QA flags, writer round-trip) plus an integration test on a small
+  window.
 - **L1C prototype.** Implement the line-of-sight + ephemeris/attitude + DEM
   geolocation, with GCP (Ground Control Point) refinement to compensate for the absent GNSS (Global Navigation Satellite System) lock.
 - **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN

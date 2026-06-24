@@ -1,8 +1,8 @@
-"""Tests for the detector-temperature line-timing model.
+"""Tests for ``PackageReader`` parsing and timing helpers.
 
-These cover the timestamp-based mapping of telemetry samples to along-track
-lines (the exact model) and its uniform-spacing fallback, using small synthetic
-fixtures only — no proprietary data.
+These cover the timestamp/clock helpers, the timestamp→line mapping of detector
+temperature samples and its guard conditions, and the optional-field coercion —
+using small synthetic fixtures only, no proprietary data.
 """
 
 from __future__ import annotations
@@ -10,9 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spp.calibration.l1b_calibrator import L1BCalibrator
-from spp.core.acquisition import Acquisition, ImagerConfiguration
-from spp.core.calibration_parameters import CalibrationParameters
+from spp.core.acquisition import ImagerConfiguration
 from spp.readers.package_reader import PackageReader
 
 
@@ -26,20 +24,6 @@ def make_imager_config(line_period: int = 500) -> ImagerConfiguration:
         scan_direction=1,
         binning_factor=0,
     )
-
-
-def make_acquisition(temps, sample_lines=None) -> Acquisition:
-    return Acquisition(
-        scene_id="synthetic",
-        bands={},
-        calibration=CalibrationParameters(radiometric=[]),
-        imager_config=make_imager_config(),
-        sensor_temperatures=np.asarray(temps, dtype=np.float64),
-        temperature_sample_lines=sample_lines,
-    )
-
-
-# -- reader timing helpers --------------------------------------------------
 
 
 def test_iso_to_epoch_ms():
@@ -113,26 +97,3 @@ def test_optional_float_treats_missing_and_null_as_default():
     # A malformed (non-numeric) value still fails loudly.
     with pytest.raises((TypeError, ValueError)):
         PackageReader._optional_float("not-a-number")
-
-
-# -- calibrator interpolation ----------------------------------------------
-
-
-def test_interpolate_uniform_fallback():
-    acq = make_acquisition([0.0, 10.0])  # no sample_lines -> uniform
-    profile = L1BCalibrator(acq)._interpolate_temperature(11)
-    np.testing.assert_allclose(profile, np.linspace(0.0, 10.0, 11))
-
-
-def test_interpolate_timestamped_positions():
-    # Samples sit at lines 0 and 5; lines beyond 5 clamp to the last value.
-    acq = make_acquisition([0.0, 10.0], sample_lines=np.array([0.0, 5.0]))
-    profile = L1BCalibrator(acq)._interpolate_temperature(11)
-    expected = np.concatenate([np.linspace(0.0, 10.0, 6), np.full(5, 10.0)])
-    np.testing.assert_allclose(profile, expected)
-
-
-def test_interpolate_single_sample_is_constant():
-    acq = make_acquisition([5.0])
-    profile = L1BCalibrator(acq)._interpolate_temperature(7)
-    np.testing.assert_allclose(profile, np.full(7, 5.0))
