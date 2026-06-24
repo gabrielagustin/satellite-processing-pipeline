@@ -13,11 +13,11 @@ alternatives considered, what was chosen, and the trade-offs.
   reconstruct.
 - **L1C** (georeferencing) — depends on external data (DEM) and the full
   ephemeris/attitude chain; it also cannot be *absolutely* validated from the
-  package alone (no GNSS lock, no reference orthoimage shipped).
+  package alone (no GNSS — Global Navigation Satellite System — lock, no reference orthoimage shipped).
 - **L2A** (surface reflectance) — the most external-data-intensive level
   (atmospheric state, aerosol model), with the least in-package validation.
 
-**Choice.** L1B. It is **self-contained** (every required asset — CPF, filters,
+**Choice.** L1B. It is **self-contained** (every required asset — CPF (Calibration Parameter File), filters,
 solar, telemetry — is in the package), produces the **first physically
 meaningful** product (radiance in SI units), is the **foundation** every higher
 level builds on, **exercises the provided calibration assets**, and is **fully
@@ -169,7 +169,7 @@ to skip).
 
 **Choice.** Place each sample at its true line from its `ImagerTime` timestamp,
 anchoring the line clock to the imager clock via the `TimeSync` block (an
-`ImagerTime`↔platform-epoch tie, confirmed by 1 Hz PPS pulses) and the
+`ImagerTime`↔platform-epoch tie, confirmed by 1 Hz PPS (Pulse Per Second) pulses) and the
 acquisition start time; line `ℓ` is then at `t_line0 + ℓ · line_period`. The
 uniform model remains as a **fallback** when timing inputs are missing, and the
 chosen model is recorded in provenance.

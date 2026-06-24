@@ -73,7 +73,7 @@ features (coastline, water, land), an end-to-end visual sanity check.
 ## Remaining levels (see [`remaining_levels.md`](remaining_levels.md))
 
 - **L1A** — round-trip against a reference L1A product; line count vs timing.
-- **L1C** — GCP/tie-point RMSE against a reference orthoimage; band
+- **L1C** — GCP (Ground Control Point)/tie-point RMSE against a reference orthoimage; band
   co-registration error; computed footprint vs the STAC `bbox`.
 - **L2A** — comparison to a coincident reference surface-reflectance product over
   stable targets; AERONET-based checks; physical sanity (NIR over deep water ≈ 0).

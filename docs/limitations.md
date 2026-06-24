@@ -35,7 +35,7 @@ band **mean** almost unchanged — which is why scalar QA does not catch it.
 ### 2. Missing or mismatched calibration entry
 
 The calibrator selects a radiometric entry by `(band, start_row, tdi)`. If the
-acquisition runs in a configuration absent from the CPF (e.g. a different TDI or
+acquisition runs in a configuration absent from the CPF — Calibration Parameter File — (e.g. a different TDI (Time-Delay Integration) or
 start row), the lookup raises and the run fails; a wrong-but-present entry would
 silently miscalibrate.
 
@@ -53,7 +53,7 @@ By default the saturation check is disabled (`saturation_dn = None`) because the
 saturation level depends on the quantisation mode. Saturated pixels then become
 plausible-looking high radiance.
 
-- **Detect.** Set `saturation_dn` from the quantisation/ADC configuration (e.g.
+- **Detect.** Set `saturation_dn` from the quantisation/ADC (Analogue-to-Digital Converter) configuration (e.g.
   the 12-bit maximum) and inspect the saturated-pixel and high-radiance fractions
   in the QA report.
 - **Handle.** Enable the threshold per acquisition mode; raise the `saturation`
@@ -91,9 +91,10 @@ naive statistics) can propagate it or skew results.
   flags, writer round-trip) plus an integration test on a small window, wired
   into CI.
 - **L1C prototype.** Implement the line-of-sight + ephemeris/attitude + DEM
-  geolocation, with GCP refinement to compensate for the absent GNSS lock.
+  geolocation, with GCP (Ground Control Point) refinement to compensate for the absent GNSS (Global Navigation Satellite System) lock.
 - **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN
-  from the provided solar + filter assets and emit TOA reflectance.
+  (exo-atmospheric solar irradiance) from the provided solar + filter assets and
+  emit TOA reflectance.
 - **Sensor profiles via config.** Externalise per-sensor parameters into config
   files so a new mission is onboarded without code changes.
 - **Parallelism.** Bands are independent — process them concurrently
