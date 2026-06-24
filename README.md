@@ -80,7 +80,7 @@ patterns), so exact file names are not hard-coded.
 Written to the output directory:
 
 - `<BAND>.tif` — one `float32` TOA radiance raster per band
-  (`W / (m² · sr · nm)`), tiled with internal overviews, NoData = NaN, no CRS
+  (`W / (m² · sr · µm)`), tiled with internal overviews, NoData = NaN, no CRS
   (L1B is still in sensor coordinates);
 - `qa_report.json` — per-band statistics and quality flags;
 - `<scene_id>_L1B.json` — a STAC item cataloguing the product (band assets,

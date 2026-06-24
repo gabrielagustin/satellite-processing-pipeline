@@ -160,11 +160,13 @@ external-data-intensive level.**
   `spectral_solar.json`).
 - `rsr_b(λ)` — relative spectral response of band `b` at `λ` (from
   `filters_payload_0.json`).
-- `ESUN_b` — band-integrated exo-atmospheric solar irradiance for band `b`
-  (`W·m⁻²·nm⁻¹`); the response-weighted average of `E_sun` over the band.
+- `ESUN_b` — band-integrated exo-atmospheric solar irradiance for band `b`; the
+  response-weighted average of `E_sun` over the band. Express it in the **same
+  spectral unit as `L`** (per µm — i.e. the per-nm solar integral × 10³) so
+  `ρ_TOA` comes out unitless.
 - `d` — Earth–Sun distance (astronomical units) at the acquisition date (from
   `temporal_solar.json`); the `d²` term normalises for the seasonal Sun distance.
-- `L` — at-sensor (L1C) spectral radiance, `W·m⁻²·sr⁻¹·nm⁻¹`.
+- `L` — at-sensor (L1C) spectral radiance, `W·m⁻²·sr⁻¹·µm⁻¹` (the L1B output unit).
 - `θ_s` — solar zenith angle; `cos θ_s` corrects for the illumination geometry.
 - `π` — converts radiance (per steradian) to a (Lambertian) reflectance.
 - `ρ_TOA` — top-of-atmosphere (apparent) reflectance, unitless in `[0, 1]`.

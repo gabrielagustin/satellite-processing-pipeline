@@ -104,7 +104,7 @@ radiance**, still in sensor coordinates.
   thermal-intercept and thermal-gradient.
 - Per-line detector temperature telemetry.
 
-**Output.** One `float32` radiance raster per band (units `W / (m² · sr · nm)`),
+**Output.** One `float32` radiance raster per band (units `W / (m² · sr · µm)`),
 NoData = NaN, no CRS; a per-band QA report; and a **STAC item** cataloguing the
 product (band assets, spectral/raster properties, processing lineage). The STAC
 item's geometry is `null` — L1B is not yet georeferenced.

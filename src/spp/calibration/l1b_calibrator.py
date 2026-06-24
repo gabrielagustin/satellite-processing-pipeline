@@ -43,8 +43,8 @@ class L1BCalibrator(Calibrator):
     assessment can flag them rather than silently masking calibration bias.
     """
 
-    #: Physical units of the output radiance (matches the solar reference).
-    UNITS = "W / (m2 sr nm)"
+    #: Physical units of the output radiance (TOA spectral radiance, per micrometre).
+    UNITS = "W / (m2 sr um)"
 
     def __init__(
         self,

@@ -42,16 +42,30 @@ per-band metric and flag schema is documented in [`qa_report.md`](qa_report.md).
 **Temperature line-timing.** Unit tests (`tests/test_temperature_timing.py`)
 cover the timestamp→line mapping, its uniform fallback, and the edge cases
 (missing timing, single sample). The impact was quantified on the real scene by
-comparing per-line radiance under the timestamped vs uniform models: the band
-mean barely moves (39.38 vs 39.41) but the along-track per-line bias reaches
-~3.5 %, confirming the timestamped model corrects a banding gradient that scalar
-QA cannot see.
+comparing, for the R band, the **per-line mean TOA spectral radiance** (the L1B
+output quantity, `W·m⁻²·sr⁻¹·µm⁻¹`) under the timestamped vs uniform models: the
+band-mean radiance barely moves (39.38 vs 39.41) but the **along-track per-line
+mean** shifts by up to **~3.5 %**, confirming the timestamped model corrects a
+banding gradient that scalar (whole-band) QA cannot see.
 
 **Physical plausibility (full scene).** Across all eight bands the run passes QA,
-with radiance magnitudes in the expected range (e.g. red ≈ 40 W·m⁻²·sr⁻¹·nm⁻¹)
-and the band-mean radiance **decreasing from the visible to the NIR**, as
-expected for the scene. The RGB quicklook reproduces recognisable surface
-features (coastline, water, land), an end-to-end visual sanity check.
+with radiance magnitudes in the **physically expected range** and the band-mean
+radiance **decreasing from the visible to the NIR**.
+
+- *Magnitude.* Red ≈ 40 W·m⁻²·sr⁻¹·µm⁻¹ (≈ 0.04 W·m⁻²·sr⁻¹·nm⁻¹). Cross-check
+  against the package solar spectrum: at 665 nm `E_sun ≈ 1.55 W·m⁻²·nm⁻¹`
+  (`spectral_solar.json`), so for a surface reflectance ρ and high Sun,
+  `L ≈ ρ·E_sun·cos θ_s / π ≈ 0.04 W·m⁻²·sr⁻¹·nm⁻¹` at ρ ≈ 0.1 — matching the
+  product. (A red radiance of 40 *per nm* would exceed the solar irradiance and
+  is unphysical; the unit is **per µm**.)
+- *Spectral order.* The visible→NIR decrease follows from the solar spectral
+  irradiance peaking in the visible and falling toward the NIR, combined with low
+  NIR reflectance over the predominantly water/coastal surface.
+
+The RGB quicklook reproduces recognisable surface features (coastline, water,
+land), an end-to-end visual sanity check. See
+[`references.md`](references.md) for the solar-spectrum references underpinning
+the expectation.
 
 **Reproducibility.** Per-band statistics and flags are written to
 `qa_report.json` on every run for audit and regression comparison.
