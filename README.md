@@ -122,9 +122,12 @@ pip install -e '.[test]'
 pytest
 ```
 
-The current suite covers the detector-temperature line-timing model (timestamped
-mapping, uniform fallback, edge cases) with synthetic fixtures — no proprietary
-data required.
+The suite is organised one file per module under test: `test_l1b_calibrator.py`
+covers the L1B calibrator core (the `calibrate()` DN→radiance path, windowed
+exactness, NoData masking, validation) and the temperature-interpolation model;
+`test_package_reader.py` covers the reader timing/parsing helpers (timestamp→line
+mapping, optional-field coercion). Synthetic fixtures only — no proprietary data
+required.
 
 ---
 
