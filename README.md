@@ -37,12 +37,18 @@ Requires Python 3.11+.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .            # installs the `spp-l1b` command
+pip install -e .            # runtime deps + the `spp-l1b` command
 ```
 
 Core dependencies: `numpy`, `rasterio`. Quicklook generation additionally needs
-`matplotlib` (`pip install -e '.[viz]'`).
+`matplotlib` (`pip install -e '.[viz]'`); for the test suite,
+`pip install -e '.[test]'`.
+
+Dependencies are declared in `pyproject.toml` (the packaging source of truth,
+which also registers the `spp-l1b` command and the `viz` / `test` extras). A
+`requirements.txt` mirroring the runtime deps is also provided for convenience
+and for environments that expect one (`pip install -r requirements.txt`);
+installing the package with `pip install -e .` alone is sufficient.
 
 ---
 

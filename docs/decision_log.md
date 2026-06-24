@@ -184,3 +184,24 @@ almost unchanged — invisible to scalar QA. The timestamped model corrects it.
 Verified on the real scene (per-line radiance comparison) and covered by unit
 tests (`tests/test_package_reader.py` for the timestamp→line mapping,
 `tests/test_l1b_calibrator.py` for the interpolation).
+
+---
+
+## 12. Keep both `requirements.txt` and `pyproject.toml`
+
+**Alternatives.** Ship only one: a bare `requirements.txt` (as the challenge
+asked for), or only `pyproject.toml`.
+
+**Choice.** Keep both, with `pyproject.toml` as the **packaging source of
+truth** — it declares the runtime dependencies, the optional extras (`viz`,
+`test`) and the `spp-l1b` console script, and enables an editable install
+(`pip install -e .`). `requirements.txt` is retained because the challenge
+requested it, kept as a thin **mirror of the runtime dependencies** for
+convenience and for tooling that expects one.
+
+**Trade-offs.** Two dependency lists to keep in sync, but the duplication is
+small (two packages) and bounded: the extras and the entry point live only in
+`pyproject.toml`, so `pip install -e .` alone is sufficient to install and run.
+To avoid a contradiction, the optional `matplotlib` is **not** an active line in
+`requirements.txt` (it is the `viz` extra: `pip install -e '.[viz]'`), so the
+base install matches the "matplotlib is optional" framing.
