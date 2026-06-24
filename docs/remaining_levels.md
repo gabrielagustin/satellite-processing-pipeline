@@ -24,10 +24,10 @@ L0 ingest.)*
 
 **Inputs.**
 - `raw.bin` — the raw session binary (detector readout stream + housekeeping).
-- `ImagerConfiguration` — line period, `SpectralBands`, per-band TDI
+- `ImagerConfiguration` — line period, `SpectralBands`, per-band TDI (Time-Delay Integration)
   (`BandSetup`), per-band detector `BandStartRow`, `ScanDirection`,
   `BinningFactor`.
-- `SensorConfiguration` — ADC range, readout offsets, gain, e-black flag.
+- `SensorConfiguration` — ADC (Analogue-to-Digital Converter) range, readout offsets, gain, e-black flag.
 
 **Algorithm.**
 1. Parse the binary container; validate frame/packet CRCs; recover the readout
@@ -66,13 +66,13 @@ external-data-dependent geometric level.**
 
 **Inputs.**
 - L1B radiance bands (sensor coordinates).
-- **Ephemeris** — platform position/velocity in ECEF (`ancillary.extrinsics.hist`,
+- **Ephemeris** — platform position/velocity in ECEF — Earth-Centred, Earth-Fixed — (`ancillary.extrinsics.hist`,
   frame 3), time-tagged.
 - **Attitude** — body-frame quaternions (`ancillary.extrinsics.hist`, frame 1),
   time-tagged.
 - **Camera intrinsics** — focal length, pixel pitch, principal point, sensor
   size, body→detector reference frame (`ancillary.intrinsics`).
-- **Geometric calibration (CPF)** — `boreSightAlignment` (3×3) and per-band
+- **Geometric calibration (CPF — Calibration Parameter File)** — `boreSightAlignment` (3×3) and per-band
   `lineOfSight` arrays (`along`, `across`, radians per detector column).
 - **DEM** — external elevation model (e.g. Copernicus GLO-30) over the footprint.
 - Earth model (WGS84) and a time system (UTC ↔ GPS/leap seconds) for ephemeris
@@ -82,7 +82,7 @@ external-data-dependent geometric level.**
 1. **Line timing.** Assign each raster line `ℓ` a UTC time from the acquisition
    start, line period and `ScanDirection` (or per-line timing if available).
 2. **State interpolation.** Interpolate ephemeris (position/velocity) and
-   attitude to each line time — linear/Hermite for position, SLERP for
+   attitude to each line time — linear/Hermite for position, SLERP (spherical linear interpolation) for
    quaternions.
 3. **Viewing ray.** For detector column `c`, form the line-of-sight unit vector
    from `(along[c], across[c])`; rotate by `boreSightAlignment`, then by the
@@ -92,14 +92,14 @@ external-data-dependent geometric level.**
    that point, re-intersect at the new height until convergence (terrain
    correction).
 5. **Sensor model.** The set of per-`(ℓ, c)` ground coordinates defines a
-   sensor-to-ground mapping. Densify it into a GCP grid or fit RPCs.
-6. **Resampling.** Warp each band onto the target grid/CRS at a chosen GSD
+   sensor-to-ground mapping. Densify it into a GCP (Ground Control Point) grid or fit RPCs (Rational Polynomial Coefficients).
+6. **Resampling.** Warp each band onto the target grid/CRS at a chosen GSD (Ground Sample Distance)
    (inverse mapping: for each output pixel, find the source `(ℓ, c)` and
    interpolate). Each band uses its **own** LoS (and start-row time offset), which
    is what co-registers the bands.
 
 **Key challenges.**
-- **No GNSS lock** in this acquisition (`extrinsics.gnss_lock = false`) →
+- **No GNSS (Global Navigation Satellite System) lock** in this acquisition (`extrinsics.gnss_lock = false`) →
   degraded absolute geolocation; expect a bulk offset and plan for GCP/tie-point
   refinement against a reference image.
 - **Time synchronisation** — a small clock offset (`time_sync_offset` in STAC)
@@ -141,7 +141,7 @@ external-data-intensive level.**
 - DEM (surface pressure / altitude correction).
 
 **Algorithm.**
-1. **Band solar irradiance (ESUN).** For each band, weight the reference solar
+1. **Band solar irradiance (ESUN — exo-atmospheric solar irradiance).** For each band, weight the reference solar
    spectrum by the band's relative spectral response and integrate:
    `ESUN_b = Σ(E_sun(λ)·rsr_b(λ)) / Σ(rsr_b(λ))`. Scale by the temporal solar
    model evaluated at the acquisition date (Earth–Sun distance `d`).
@@ -151,7 +151,7 @@ external-data-intensive level.**
    sun/view geometry to obtain path radiance, atmospheric transmittance (up/down)
    and spherical albedo; invert to surface reflectance
    `ρ_s = f(ρ_TOA; xa, xb, xc)`. For aquatic scenes, use a water-optimised scheme
-   (SWIR/NIR-based aerosol estimation; retrieve water-leaving reflectance).
+   (SWIR (Short-Wave Infrared)/NIR-based aerosol estimation; retrieve water-leaving reflectance).
 4. Mask clouds/cloud-shadow/sun-glint; write per-band surface reflectance.
 
 **Key challenges.**
@@ -175,4 +175,4 @@ external-data-intensive level.**
 ## References
 
 See [`references.md`](references.md). Key external resources: Copernicus DEM,
-GDAL warp/VRT, Py6S / 6S, ACOLITE, STAC, CEOS product-level definitions.
+GDAL warp/VRT, Py6S / 6S, ACOLITE, STAC, CEOS (Committee on Earth Observation Satellites) product-level definitions.

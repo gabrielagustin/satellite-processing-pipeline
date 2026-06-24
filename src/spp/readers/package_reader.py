@@ -71,9 +71,16 @@ class PackageReader(Reader):
 
         name_to_id = self._band_name_to_id()
         bands = self._build_bands(stac, name_to_id, imager_config)
-        temps = self._sensor_temperatures(session)
+        temps, sample_times = self._temperature_samples(session)
 
         scene_id, acquired_at = self._scene_identity(stac)
+        sample_lines = self._temperature_sample_lines(
+            session,
+            imager_config,
+            acquired_at,
+            sample_times,
+            self._time_sync_offset(stac),
+        )
 
         return Acquisition(
             scene_id=scene_id,
@@ -81,6 +88,7 @@ class PackageReader(Reader):
             calibration=calibration,
             imager_config=imager_config,
             sensor_temperatures=temps,
+            temperature_sample_lines=sample_lines,
             acquired_at=acquired_at,
             metadata=self._provenance_metadata(session),
             ancillary=ancillary or {},
@@ -225,14 +233,108 @@ class PackageReader(Reader):
         return trimmed
 
     @staticmethod
-    def _sensor_temperatures(session: dict) -> np.ndarray:
+    def _temperature_samples(session: dict) -> tuple[np.ndarray, np.ndarray]:
+        """Detector temperature samples and their imager timestamps.
+
+        Returns two parallel arrays ``(temperatures, imager_times)``. Only
+        samples carrying both a temperature and a timestamp are kept, so the two
+        arrays stay aligned; ``imager_times`` is empty when no timestamps are
+        present.
+        """
         telemetry = session.get("ImagerTelemetry", [])
-        temps = [
-            t["SensorTemperature"]
-            for t in telemetry
-            if isinstance(t, dict) and "SensorTemperature" in t
-        ]
-        return np.asarray(temps, dtype=np.float64)
+        temps: list[float] = []
+        times: list[float] = []
+        for t in telemetry:
+            if not isinstance(t, dict) or "SensorTemperature" not in t:
+                continue
+            temps.append(t["SensorTemperature"])
+            times.append(t["ImagerTime"] if "ImagerTime" in t else np.nan)
+        temps_arr = np.asarray(temps, dtype=np.float64)
+        times_arr = np.asarray(times, dtype=np.float64)
+        if times_arr.size and np.isnan(times_arr).any():
+            times_arr = np.asarray([], dtype=np.float64)  # incomplete timing
+        return temps_arr, times_arr
+
+    def _temperature_sample_lines(
+        self,
+        session: dict,
+        imager_config: ImagerConfiguration,
+        acquired_at: str | None,
+        sample_times: np.ndarray,
+        time_sync_offset_s: float,
+    ) -> np.ndarray | None:
+        """Map each temperature sample to its along-track line index.
+
+        Uses the detector timestamps (``ImagerTime``) and the per-line timing to
+        place each sample at its true line, which is exact even when the
+        telemetry is irregularly spaced or extends beyond the imaging window.
+        Returns ``None`` when any required timing input is missing, so the
+        calibrator falls back to uniform spreading.
+
+        The line clock is anchored to the imager clock via the ``TimeSync``
+        block (which ties an ``ImagerTime`` to a platform epoch time) and the
+        acquisition start time; line ``l`` is then at
+        ``t_line0 + l * line_period``.
+        """
+        if sample_times.size == 0 or acquired_at is None:
+            return None
+        anchor = self._time_sync_anchor(session)
+        line_period = imager_config.line_period_us
+        start_ms = self._iso_to_epoch_ms(acquired_at)
+        if anchor is None or not line_period or start_ms is None:
+            return None
+        imager_ref_us, platform_ref_ms = anchor
+        # ImagerTime of the first image line: convert the acquisition start
+        # (epoch ms) into the imager clock (µs) through the sync anchor.
+        t_line0_us = (
+            imager_ref_us
+            + (start_ms - platform_ref_ms) * 1000.0
+            + time_sync_offset_s * 1e6
+        )
+        return (sample_times - t_line0_us) / float(line_period)
+
+    @staticmethod
+    def _time_sync_anchor(session: dict) -> tuple[float, float] | None:
+        """Return ``(imager_time_us, platform_time_ms)`` from the TimeSync block.
+
+        The anchor is the entry tying the imager clock to the platform epoch
+        clock (``TimeFormat == 1``); the bare PPS entries are ignored.
+        """
+        for entry in session.get("TimeSync", []):
+            if (
+                isinstance(entry, dict)
+                and entry.get("TimeFormat") == 1
+                and "ImagerTime" in entry
+                and "PlatformTime" in entry
+            ):
+                return float(entry["ImagerTime"]), float(entry["PlatformTime"])
+        return None
+
+    @staticmethod
+    def _iso_to_epoch_ms(iso: str) -> float | None:
+        """Convert an ISO-8601 UTC timestamp to epoch milliseconds."""
+        from datetime import datetime, timezone
+
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp() * 1000.0
+
+    @staticmethod
+    def _time_sync_offset(stac: dict | None) -> float:
+        """Calibration clock offset (seconds) from the STAC properties, if any."""
+        if not stac:
+            return 0.0
+        for key, value in stac.get("properties", {}).items():
+            if key.endswith("time_sync_offset"):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
 
     @staticmethod
     def _scene_identity(stac: dict | None) -> tuple[str, str | None]:

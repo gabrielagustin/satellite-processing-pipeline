@@ -48,7 +48,7 @@ class Reader(ABC):
 
 `PackageReader` discovers the band rasters (from the STAC assets) and the
 calibration assets (by glob), reads only raster **metadata** (lazy bands), parses
-the CPF and imager configuration, and assembles an `Acquisition`. No calibration,
+the CPF (Calibration Parameter File) and imager configuration, and assembles an `Acquisition`. No calibration,
 no processing.
 
 ### Calibrator — `calibration/`
@@ -114,7 +114,7 @@ Pure dataclasses, no raster-library dependency, no sensor proper nouns.
 |---|---|
 | `Band` | One spectral band — **lazy**: path + raster properties, never pixels. |
 | `Acquisition` | The package as a domain object: bands + calibration + imager config + telemetry. |
-| `ImagerConfiguration` | Per-acquisition imager settings (line period, per-band TDI/start row/CWL — central wavelength). |
+| `ImagerConfiguration` | Per-acquisition imager settings (line period, and per-band Time-Delay Integration (TDI), start row and central wavelength (CWL)). |
 | `RadiometricCalibration` | Coefficients for one `(band, start_row, tdi)`. |
 | `CalibrationParameters` | Calibration collection with `lookup(band, start_row, tdi)`; retains the geometric block for L1C. |
 | `Product` | Generated product described **by reference** (output paths) + metadata + provenance. |

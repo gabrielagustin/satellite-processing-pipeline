@@ -181,6 +181,12 @@ class L1BPipeline(ProcessingPipeline):
 
     def _build_provenance(self, acquisition: Acquisition, calibrator: L1BCalibrator) -> dict:
         cal = acquisition.calibration
+        timed = acquisition.temperature_sample_lines is not None
+        temperature_model = (
+            "per_line_timestamped_interpolation"
+            if timed
+            else "per_line_uniform_interpolation"
+        )
         return {
             "source_scene_id": acquisition.scene_id,
             "software": {"name": "spp", "version": spp_version},
@@ -188,7 +194,7 @@ class L1BPipeline(ProcessingPipeline):
                 r.band: r.uuid for r in cal.radiometric
             },
             "processing": {
-                "temperature_model": "per_line_linear_interpolation",
+                "temperature_model": temperature_model,
                 "window_lines": self.window_lines,
                 "nodata": calibrator.nodata,
                 "clipping": "none",

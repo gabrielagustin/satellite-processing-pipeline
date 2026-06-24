@@ -39,6 +39,14 @@ and standard deviation as a single-shot computation, so the streamed QA is exact
 `high_nodata`, `negative_radiance`, `saturation`, `zero_dynamic_range`. The full
 per-band metric and flag schema is documented in [`qa_report.md`](qa_report.md).
 
+**Temperature line-timing.** Unit tests (`tests/test_temperature_timing.py`)
+cover the timestamp→line mapping, its uniform fallback, and the edge cases
+(missing timing, single sample). The impact was quantified on the real scene by
+comparing per-line radiance under the timestamped vs uniform models: the band
+mean barely moves (39.38 vs 39.41) but the along-track per-line bias reaches
+~3.5 %, confirming the timestamped model corrects a banding gradient that scalar
+QA cannot see.
+
 **Physical plausibility (full scene).** Across all eight bands the run passes QA,
 with radiance magnitudes in the expected range (e.g. red ≈ 40 W·m⁻²·sr⁻¹·nm⁻¹)
 and the band-mean radiance **decreasing from the visible to the NIR**, as
@@ -52,8 +60,9 @@ features (coastline, water, land), an end-to-end visual sanity check.
 
 ## Ongoing / recommended
 
-- **Unit tests** per module with small synthetic fixtures (reader parsing,
-  calibration math, QA flags, writer round-trip).
+- **Unit tests** — a focused suite exists for the temperature-timing model;
+  extend per module with small synthetic fixtures (reader parsing, calibration
+  math, QA flags, writer round-trip).
 - **Integration test** on a small window, asserting against a stored reference.
 - **Regression fixtures** — pin `qa_report.json` summary metrics for the
   reference scene and diff on change.
@@ -64,7 +73,7 @@ features (coastline, water, land), an end-to-end visual sanity check.
 ## Remaining levels (see [`remaining_levels.md`](remaining_levels.md))
 
 - **L1A** — round-trip against a reference L1A product; line count vs timing.
-- **L1C** — GCP/tie-point RMSE against a reference orthoimage; band
+- **L1C** — GCP (Ground Control Point)/tie-point RMSE against a reference orthoimage; band
   co-registration error; computed footprint vs the STAC `bbox`.
 - **L2A** — comparison to a coincident reference surface-reflectance product over
   stable targets; AERONET-based checks; physical sanity (NIR over deep water ≈ 0).

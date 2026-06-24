@@ -9,7 +9,7 @@ multispectral **pushbroom (linescan)** imager with the following characteristics
 framework):
 
 - **8 spectral bands** — one panchromatic plus blue, green, red, three red-edge
-  and a near-infrared band (VNIR, ~490–842 nm).
+  and a near-infrared band (VNIR — Visible and Near Infrared, ~490–842 nm).
 - A single-frame **CIS (CMOS Image Sensor) detector** read out in linescan mode, with per-band
   **Time-Delay Integration (TDI)** and a per-band detector **start row**.
 - Cross-track width of 4096 detector columns; along-track dimension built up over

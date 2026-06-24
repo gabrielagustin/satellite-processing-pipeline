@@ -141,19 +141,35 @@ class L1BCalibrator(Calibrator):
     def _interpolate_temperature(self, n_lines: int) -> np.ndarray:
         """Interpolate the telemetry temperatures onto ``n_lines`` lines.
 
-        The samples are assumed to be spread uniformly across the acquisition.
-        This is an approximation: the telemetry carries timestamps that, with
-        per-line timing, would give an exact mapping. Uniform spreading is a
-        reasonable first-order model and is documented as a known limitation.
+        When the reader has resolved the along-track line position of each
+        telemetry sample from its timestamp (``temperature_sample_lines``), the
+        samples are interpolated **at their true line positions** — exact even if
+        the telemetry is irregularly spaced or brackets the acquisition window.
+
+        When that timing is unavailable, the samples are spread **uniformly**
+        across the lines. This is a first-order approximation (it assumes the
+        samples are equally spaced in time and exactly span the acquisition) and
+        is documented as a known limitation.
         """
         temps = np.asarray(self._acq.sensor_temperatures, dtype=np.float64)
         if temps.size == 0:
             raise ValueError("No detector temperature samples available")
         if temps.size == 1:
             return np.full(n_lines, temps[0], dtype=np.float64)
-        sample_positions = np.linspace(0.0, n_lines - 1, temps.size)
+
+        sample_positions = self._acq.temperature_sample_lines
+        if sample_positions is None:
+            # Fallback: assume samples are uniformly spaced over the lines.
+            sample_positions = np.linspace(0.0, n_lines - 1, temps.size)
+        else:
+            sample_positions = np.asarray(sample_positions, dtype=np.float64)
+
+        # np.interp needs ascending sample positions; sort jointly to be safe.
+        order = np.argsort(sample_positions)
         line_positions = np.arange(n_lines, dtype=np.float64)
-        return np.interp(line_positions, sample_positions, temps)
+        return np.interp(
+            line_positions, sample_positions[order], temps[order]
+        )
 
 
 class _BandContext:

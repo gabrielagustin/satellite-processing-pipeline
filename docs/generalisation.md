@@ -16,10 +16,10 @@ seam that absorbs it.
 
 | Element | Sensor-specific? | Where it lives | How it generalises |
 |---|---|---|---|
-| Band set, names, CWL, order, PAN-or-not | Data | STAC assets, filter file, metadata | Discovered at read time — no code change |
-| Detector geometry (width, start rows, TDI, line period) | Data | `ImagerConfiguration` (metadata) | Parsed generically per acquisition |
+| Band set, names, CWL (central wavelength), order, PAN-or-not | Data | STAC assets, filter file, metadata | Discovered at read time — no code change |
+| Detector geometry (width, start rows, TDI — Time-Delay Integration, line period) | Data | `ImagerConfiguration` (metadata) | Parsed generically per acquisition |
 | File layout & naming | Format | `PackageReader` | New layout → new `Reader` implementation |
-| **Radiometric model** (the equation + coefficient semantics) | **Code** | `L1BCalibrator`, CPF parsing | Swap via `Calibrator` ABC + model registry |
+| **Radiometric model** (the equation + coefficient semantics) | **Code** | `L1BCalibrator`, CPF (Calibration Parameter File) parsing | Swap via `Calibrator` ABC + model registry |
 | NoData, dtype, units | Param | Calibrator / writer args | Configuration values |
 | Native CRS & sensor→ground model | Code (L1C) | (future) geometric stage | Target CRS as a parameter; LoS/ephemeris are generic |
 
@@ -33,10 +33,10 @@ carry **no** mission proper nouns or sensor constants today.
 Already handled by data, not code. Bands are discovered from the STAC assets,
 the band name↔id map from the filter file, and central wavelengths from the
 metadata. Adding, removing or reordering bands (more red-edge bands, no PAN, a
-SWIR band) requires **no code change**: the reader builds whatever band set the
+SWIR (Short-Wave Infrared) band) requires **no code change**: the reader builds whatever band set the
 package declares, and the pipeline iterates it.
 
-**Caveat.** A band outside the VNIR range (e.g. SWIR/thermal) may need a
+**Caveat.** A band outside the VNIR (Visible and Near Infrared) range (e.g. SWIR/thermal) may need a
 different radiometric or atmospheric treatment — that is an Axis-2 concern, not a
 band-count one.
 
@@ -74,7 +74,7 @@ is already CRS-agnostic — a different native CRS changes nothing at L1B.
 
 CRS becomes relevant at **L1C**, where it is simply a parameter of the geometric
 stage: the sensor→ground model (line-of-sight + ephemeris + attitude + DEM) is
-generic, and the **target CRS/GSD is chosen at warp time**. The writer already
+generic, and the **target CRS/GSD (Ground Sample Distance) is chosen at warp time**. The writer already
 accepts a profile; for L1C it would additionally take a `crs` and `transform`.
 No part of the radiometric chain depends on the CRS.
 

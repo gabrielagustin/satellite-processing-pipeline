@@ -13,11 +13,11 @@ alternatives considered, what was chosen, and the trade-offs.
   reconstruct.
 - **L1C** (georeferencing) — depends on external data (DEM) and the full
   ephemeris/attitude chain; it also cannot be *absolutely* validated from the
-  package alone (no GNSS lock, no reference orthoimage shipped).
+  package alone (no GNSS — Global Navigation Satellite System — lock, no reference orthoimage shipped).
 - **L2A** (surface reflectance) — the most external-data-intensive level
   (atmospheric state, aerosol model), with the least in-package validation.
 
-**Choice.** L1B. It is **self-contained** (every required asset — CPF, filters,
+**Choice.** L1B. It is **self-contained** (every required asset — CPF (Calibration Parameter File), filters,
 solar, telemetry — is in the package), produces the **first physically
 meaningful** product (radiance in SI units), is the **foundation** every higher
 level builds on, **exercises the provided calibration assets**, and is **fully
@@ -51,8 +51,7 @@ and evaluate the darkfield per line.
 **Trade-offs.** The detector temperature swings ~17 °C across the acquisition;
 with a thermal gradient of ~0.45 DN/°C that is ~7.6 DN of dark drift — a
 systematic, along-track error a single mean would bake in. Interpolation removes
-it. It assumes the telemetry samples are uniformly spaced in time (see
-[`limitations.md`](limitations.md) for the exact-timing refinement).
+it. How each sample maps to a line is itself a decision — see §11.
 
 ---
 
@@ -160,3 +159,27 @@ to skip).
 > approximate). This is a legitimate choice when catalogue discoverability is
 > prioritised over strict rigour; it would be a deliberate, documented toggle,
 > never a silent default. We keep `null` here as the more rigorous default.
+
+---
+
+## 11. Map temperature samples to lines by timestamp (not uniform spacing)
+
+**Alternatives.** Spread the telemetry samples **uniformly** across the lines
+(assume equal spacing and that the telemetry exactly spans the acquisition).
+
+**Choice.** Place each sample at its true line from its `ImagerTime` timestamp,
+anchoring the line clock to the imager clock via the `TimeSync` block (an
+`ImagerTime`↔platform-epoch tie, confirmed by 1 Hz PPS (Pulse Per Second) pulses) and the
+acquisition start time; line `ℓ` is then at `t_line0 + ℓ · line_period`. The
+uniform model remains as a **fallback** when timing inputs are missing, and the
+chosen model is recorded in provenance.
+
+**Trade-offs.** More parsing (TimeSync, epoch conversion) and a sensor-specific
+timing assumption in the reader — but it removes a real, measured error. On the
+reference scene the telemetry **brackets** the imaging (≈19 s of telemetry around
+a 16 s acquisition) and the temperature profile is non-monotonic, so the uniform
+model mis-assigns temperature by up to ~15 °C, biasing per-line radiance by up to
+**~3.5 %** along-track (a banding gradient) while leaving the band **mean**
+almost unchanged — invisible to scalar QA. The timestamped model corrects it.
+Verified on the real scene (per-line radiance comparison) and covered by unit
+tests (`tests/test_temperature_timing.py`).

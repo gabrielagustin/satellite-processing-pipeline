@@ -41,7 +41,7 @@ process in the same memory footprint.
 | 3 | **Cached per-band context** | Coefficient arrays (cast to `float32`) and the per-line temperature profile are computed **once per band** and reused across all windows, not per window. | `l1b_calibrator.py` (`_build_context`) |
 | 4 | **Vectorised broadcasting** | The whole window is calibrated in one NumPy expression — no Python per-pixel loops: `darkfield = ti[None,:] + tg[None,:] * T[:,None]` → `(h, 4096)`. | `l1b_calibrator.py` (`calibrate`) |
 | 5 | **Single-pass QA** | QA statistics accumulate **in the same window loop**, so quality metrics need no second read of the multi-GB output. | [`radiometric_validator.py`](../src/spp/qa/radiometric_validator.py) |
-| 6 | **Block-aligned, compressed output** | Output GeoTIFF is tiled 512×512 (matching the input COG), DEFLATE + floating-point predictor, `BIGTIFF=IF_SAFER` for >4 GB safety. Window writes align with the tile grid. | [`geotiff_writer.py`](../src/spp/products/geotiff_writer.py) |
+| 6 | **Block-aligned, compressed output** | Output GeoTIFF is tiled 512×512 (matching the input COG — Cloud-Optimized GeoTIFF), DEFLATE + floating-point predictor, `BIGTIFF=IF_SAFER` for >4 GB safety. Window writes align with the tile grid. | [`geotiff_writer.py`](../src/spp/products/geotiff_writer.py) |
 | 7 | **Overviews for previews** | Internal overviews are built once on close; the quicklook reads **decimated** (`out_shape` + averaging) via those overviews, never full resolution. | [`quicklook.py`](../src/spp/qa/quicklook.py) |
 
 ---

@@ -15,9 +15,14 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["matplotlib>=3.6"]
+test = ["pytest>=7.0"]
 
 [project.scripts]
 spp-l1b = "spp.cli.run_l1b:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

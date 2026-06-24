@@ -60,11 +60,13 @@ Acronyms used across the documentation, in one place.
 | ECEF | Earth-Centred, Earth-Fixed (coordinate frame) |
 | EO | Earth Observation / Electro-Optical (STAC extension) |
 | ESUN | Exo-atmospheric Solar Irradiance (band-mean solar irradiance) |
+| GCP | Ground Control Point |
 | GNSS | Global Navigation Satellite System |
 | GSD | Ground Sample Distance |
 | LoS | Line of Sight |
 | NIR | Near Infrared |
 | PAN | Panchromatic |
+| RPC | Rational Polynomial Coefficients |
 | RSR | Relative Spectral Response |
 | SLERP | Spherical Linear Interpolation (of quaternions) |
 | STAC | SpatioTemporal Asset Catalog |

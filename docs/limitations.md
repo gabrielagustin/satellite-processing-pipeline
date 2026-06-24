@@ -5,27 +5,37 @@
 For each: what it is, how to **detect** it, and how to **handle** it in
 production.
 
-### 1. Temperature model assumes uniformly-spaced telemetry
+### 1. Temperature sample → line mapping (timestamped, with uniform fallback)
 
-The per-line darkfield uses a temperature profile built by spreading the detector
-telemetry samples **uniformly** across the lines. The samples actually carry
-their own timestamps (`ImagerTime`); if they are irregularly spaced or have gaps,
-the uniform assumption mis-assigns temperature to lines, causing along-track
-**banding** from over/under-subtracted dark signal.
+The per-line darkfield needs each detector-temperature sample placed at its
+correct along-track line. The framework now does this **from the sample
+timestamps** (`ImagerTime`), anchoring the line clock to the imager clock via the
+`TimeSync` block and the acquisition start time — exact even when the telemetry
+is irregularly spaced or **brackets** the imaging window (as it does in the
+reference scene: telemetry spans ~19 s around a 16 s acquisition). The
+provenance records `temperature_model: per_line_timestamped_interpolation`.
 
-- **Detect.** Compare the uniform mapping against the true line↔time mapping from
-  `ImagerTime`; flag if the residual exceeds a fraction of a sample interval.
-  Monitor along-track mean radiance for steps correlated with temperature
-  transitions.
-- **Handle.** Map samples to line times using `ImagerTime` and the per-line
-  timing (exact interpolation); interpolate across gaps and flag affected lines;
-  fall back to the scene-mean temperature only if telemetry is missing entirely,
-  recording the fallback in the QA report.
+The residual risk is the **fallback**: when the timing inputs are absent (no
+`TimeSync` anchor, no start time, or samples without `ImagerTime`), the code
+spreads the samples **uniformly** across the lines
+(`per_line_uniform_interpolation`). That assumes equal spacing *and* that the
+telemetry exactly spans the acquisition — on the reference scene this uniform
+model mis-assigns temperature by up to ~15 °C in places, biasing per-line
+radiance by up to **~3.5 %** along-track (a banding gradient), while leaving the
+band **mean** almost unchanged — which is why scalar QA does not catch it.
+
+- **Detect.** Check that the timestamped model was used (provenance flag); if on
+  the fallback, flag it. Monitor along-track mean radiance for a slow gradient or
+  steps correlated with temperature transitions.
+- **Handle.** Prefer the timestamped model (now the default). On the fallback,
+  raise a QA flag and record it in provenance; interpolate across telemetry gaps
+  and flag affected lines; fall back to the scene-mean temperature only if
+  telemetry is missing entirely.
 
 ### 2. Missing or mismatched calibration entry
 
 The calibrator selects a radiometric entry by `(band, start_row, tdi)`. If the
-acquisition runs in a configuration absent from the CPF (e.g. a different TDI or
+acquisition runs in a configuration absent from the CPF — Calibration Parameter File — (e.g. a different TDI (Time-Delay Integration) or
 start row), the lookup raises and the run fails; a wrong-but-present entry would
 silently miscalibrate.
 
@@ -43,7 +53,7 @@ By default the saturation check is disabled (`saturation_dn = None`) because the
 saturation level depends on the quantisation mode. Saturated pixels then become
 plausible-looking high radiance.
 
-- **Detect.** Set `saturation_dn` from the quantisation/ADC configuration (e.g.
+- **Detect.** Set `saturation_dn` from the quantisation/ADC (Analogue-to-Digital Converter) configuration (e.g.
   the 12-bit maximum) and inspect the saturated-pixel and high-radiance fractions
   in the QA report.
 - **Handle.** Enable the threshold per acquisition mode; raise the `saturation`
@@ -76,14 +86,15 @@ naive statistics) can propagate it or skew results.
 
 ## Reflection — what I would do next
 
-- **Exact temperature timing.** Use `ImagerTime` to map telemetry to line times,
-  removing the uniform-spacing assumption (failure mode #1).
-- **Test suite + CI.** Unit tests per module (synthetic fixtures) and an
-  integration test on a small window, wired into CI.
-- **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN
-  from the provided solar + filter assets and emit TOA reflectance.
+- **Test suite + CI.** A focused unit suite exists for the temperature-timing
+  model (`tests/`); extend it per module (reader parsing, calibration math, QA
+  flags, writer round-trip) plus an integration test on a small window, wired
+  into CI.
 - **L1C prototype.** Implement the line-of-sight + ephemeris/attitude + DEM
-  geolocation, with GCP refinement to compensate for the absent GNSS lock.
+  geolocation, with GCP (Ground Control Point) refinement to compensate for the absent GNSS (Global Navigation Satellite System) lock.
+- **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN
+  (exo-atmospheric solar irradiance) from the provided solar + filter assets and
+  emit TOA reflectance.
 - **Sensor profiles via config.** Externalise per-sensor parameters into config
   files so a new mission is onboarded without code changes.
 - **Parallelism.** Bands are independent — process them concurrently
