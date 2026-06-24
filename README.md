@@ -107,6 +107,19 @@ streaming), independent of raster size.
 
 ---
 
+## Tests
+
+```bash
+pip install -e '.[test]'
+pytest
+```
+
+The current suite covers the detector-temperature line-timing model (timestamped
+mapping, uniform fallback, edge cases) with synthetic fixtures — no proprietary
+data required.
+
+---
+
 ## Repository structure
 
 ```text
