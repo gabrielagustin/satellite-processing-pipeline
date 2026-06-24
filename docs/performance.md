@@ -98,7 +98,8 @@ to the host without any risk to correctness.
 ## Reference runtime
 
 A full 8-band strip (~4096 × 31000) calibrates in **~1–2 minutes** on a laptop
-(≈8–15 s per band), producing ~4 GB of `float32` output, with flat memory.
+(≈7–10 s per band; ~68 s end-to-end on the reference scene), producing ~4 GB of
+`float32` output, with flat memory.
 
 ---
 
