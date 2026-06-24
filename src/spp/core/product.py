@@ -23,7 +23,7 @@ class Product:
         Identifier of the source scene this product derives from.
     units:
         Physical units of the band rasters (e.g.
-        ``"W / (m2 sr nm)"`` for TOA spectral radiance).
+        ``"W / (m2 sr um)"`` for TOA spectral radiance).
     bands:
         Mapping of band name to the written output raster path.
     metadata:

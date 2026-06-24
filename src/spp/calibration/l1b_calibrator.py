@@ -9,9 +9,11 @@ scaling::
     relative_corrected = (DN - darkfield(T)) * non_uniformity[col]
     radiance           = absolute * relative_corrected + absolute_offset
 
-The detector temperature ``T`` varies along track. It is provided by a small
-number of telemetry samples, which are interpolated to a per-line temperature
-profile (see :meth:`per_line_temperature`).
+The detector temperature ``T`` varies along track. A small number of telemetry
+samples are interpolated to a per-line profile at the line positions resolved
+from their timestamps (``temperature_sample_lines``, set by the reader), falling
+back to uniform spreading when that timing is unavailable (see
+:meth:`per_line_temperature`).
 """
 
 from __future__ import annotations
@@ -43,8 +45,8 @@ class L1BCalibrator(Calibrator):
     assessment can flag them rather than silently masking calibration bias.
     """
 
-    #: Physical units of the output radiance (matches the solar reference).
-    UNITS = "W / (m2 sr nm)"
+    #: Physical units of the output radiance (TOA spectral radiance, per micrometre).
+    UNITS = "W / (m2 sr um)"
 
     def __init__(
         self,

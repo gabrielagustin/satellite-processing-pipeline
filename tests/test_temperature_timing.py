@@ -8,6 +8,7 @@ fixtures only — no proprietary data.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from spp.calibration.l1b_calibrator import L1BCalibrator
 from spp.core.acquisition import Acquisition, ImagerConfiguration
@@ -100,6 +101,18 @@ def test_temperature_samples_drop_timing_if_incomplete():
     temps, times = PackageReader._temperature_samples(session)
     np.testing.assert_allclose(temps, [-1.0, 2.0])
     assert times.size == 0
+
+
+def test_optional_float_treats_missing_and_null_as_default():
+    # Missing key and explicit JSON null both mean "not specified".
+    assert PackageReader._optional_float(None) == 0.0
+    assert PackageReader._optional_float(None, default=1.5) == 1.5
+    # A real value is coerced to float; zero is preserved, not treated as null.
+    assert PackageReader._optional_float(2.5) == 2.5
+    assert PackageReader._optional_float(0) == 0.0
+    # A malformed (non-numeric) value still fails loudly.
+    with pytest.raises((TypeError, ValueError)):
+        PackageReader._optional_float("not-a-number")
 
 
 # -- calibrator interpolation ----------------------------------------------

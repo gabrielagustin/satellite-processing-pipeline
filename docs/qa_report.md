@@ -40,7 +40,7 @@ accurate".
 
 Statistics are computed over **valid** pixels only (finite radiance, i.e.
 excluding NoData/NaN and any non-finite values). Radiance units are
-`W / (m² · sr · nm)`.
+`W / (m² · sr · µm)`.
 
 | Field | Type | Definition |
 |---|---|---|

@@ -28,6 +28,16 @@ Standards, conventions and tooling consulted while building this framework.
 - **GDAL warp / VRT** — resampling onto a target CRS/grid.
   <https://gdal.org>
 
+## Solar spectral reference (radiometric plausibility, L2A ESUN)
+
+The package solar reference (`spectral_solar.json`) is a **TSIS**-style spectrum;
+these underpin the expected radiance magnitude and the visible→NIR ordering.
+
+- **TSIS-1 Hybrid Solar Reference Spectrum** — Coddington et al. (2021),
+  *Geophysical Research Letters*. <https://lasp.colorado.edu/lisird/data/tsis1_hsrs>
+- **Thuillier et al. (2003)** — solar spectral irradiance (SOLSPEC), *Solar Physics* 214.
+- **ASTM E490** — standard extraterrestrial solar spectral irradiance.
+
 ## Atmospheric reference (L2A)
 
 - **6S / Py6S** — atmospheric radiative-transfer model and Python interface.
@@ -68,6 +78,7 @@ Acronyms used across the documentation, in one place.
 | PAN | Panchromatic |
 | RPC | Rational Polynomial Coefficients |
 | RSR | Relative Spectral Response |
+| RT | Radiative Transfer |
 | SLERP | Spherical Linear Interpolation (of quaternions) |
 | STAC | SpatioTemporal Asset Catalog |
 | SWIR | Short-Wave Infrared |
