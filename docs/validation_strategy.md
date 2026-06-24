@@ -39,15 +39,15 @@ and standard deviation as a single-shot computation, so the streamed QA is exact
 `high_nodata`, `negative_radiance`, `saturation`, `zero_dynamic_range`. The full
 per-band metric and flag schema is documented in [`qa_report.md`](qa_report.md).
 
-**L1B calibration core.** Unit tests (`tests/test_temperature_timing.py`) pin the
+**L1B calibration core.** Unit tests (`tests/test_l1b_calibrator.py`) pin the
 public `calibrate()` path: the documented DN→radiance formula (checked against an
 independent reference and hand-computed pixels), the windowed-`line_start`
 equivalence to the full frame that makes streaming exact, NoData masking, and the
 shape/bounds guards.
 
-**Temperature line-timing.** Unit tests (`tests/test_temperature_timing.py`)
-cover the timestamp→line mapping, its uniform fallback, and the edge cases
-(missing timing, single sample). The impact was quantified on the real scene by
+**Temperature line-timing.** Unit tests cover the timestamp→line mapping
+(`tests/test_package_reader.py`), its uniform fallback and the edge cases
+(missing timing, single sample) (`tests/test_l1b_calibrator.py`). The impact was quantified on the real scene by
 comparing, for the R band, the **per-line mean TOA spectral radiance** (the L1B
 output quantity, `W·m⁻²·sr⁻¹·µm⁻¹`) under the timestamped vs uniform models: the
 band-mean radiance barely moves (39.38 vs 39.41) but the **along-track per-line
