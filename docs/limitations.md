@@ -90,10 +90,10 @@ naive statistics) can propagate it or skew results.
   model (`tests/`); extend it per module (reader parsing, calibration math, QA
   flags, writer round-trip) plus an integration test on a small window, wired
   into CI.
-- **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN
-  from the provided solar + filter assets and emit TOA reflectance.
 - **L1C prototype.** Implement the line-of-sight + ephemeris/attitude + DEM
   geolocation, with GCP refinement to compensate for the absent GNSS lock.
+- **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN
+  from the provided solar + filter assets and emit TOA reflectance.
 - **Sensor profiles via config.** Externalise per-sensor parameters into config
   files so a new mission is onboarded without code changes.
 - **Parallelism.** Bands are independent — process them concurrently
