@@ -1,5 +1,7 @@
 # Satellite Processing Pipeline
 
+[![CI](https://github.com/gabrielagustin/satellite-processing-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielagustin/satellite-processing-pipeline/actions/workflows/ci.yml)
+
 A modular, sensor-agnostic Earth Observation processing framework that turns raw
 multispectral payload acquisitions into calibrated products through a transparent
 L0 → L2 processing chain.

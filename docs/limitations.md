@@ -78,18 +78,18 @@ naive statistics) can propagate it or skew results.
   specified, not implemented.
 - **No reflectance / atmospheric correction.** L2A is specified, not implemented.
 - **Single-acquisition oriented.** No batch/catalogue orchestration yet.
-- **Test coverage.** Validation so far is via end-to-end and numerical-reference
-  checks (see [`validation_strategy.md`](validation_strategy.md)); a formal unit
-  test suite + CI is not yet in place.
+- **Test coverage.** A unit suite (`tests/`) runs on every push/PR via GitHub
+  Actions (see [`validation_strategy.md`](validation_strategy.md)), but it is
+  still narrow — it covers the temperature-timing model and a couple of reader
+  helpers, not yet every module.
 
 ---
 
 ## Reflection — what I would do next
 
-- **Test suite + CI.** A focused unit suite exists for the temperature-timing
-  model (`tests/`); extend it per module (reader parsing, calibration math, QA
-  flags, writer round-trip) plus an integration test on a small window, wired
-  into CI.
+- **Broaden test coverage.** CI (GitHub Actions) and a focused unit suite are in
+  place; extend the suite per module (reader parsing, calibration math, QA flags,
+  writer round-trip) plus an integration test on a small window.
 - **L1C prototype.** Implement the line-of-sight + ephemeris/attitude + DEM
   geolocation, with GCP (Ground Control Point) refinement to compensate for the absent GNSS (Global Navigation Satellite System) lock.
 - **TOA reflectance.** A quick, high-value step toward L2: compute per-band ESUN

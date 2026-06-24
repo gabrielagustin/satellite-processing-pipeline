@@ -80,7 +80,8 @@ the expectation.
 - **Integration test** on a small window, asserting against a stored reference.
 - **Regression fixtures** — pin `qa_report.json` summary metrics for the
   reference scene and diff on change.
-- **CI** to run the above on every commit.
+- **CI** — GitHub Actions runs `pytest` on every push/PR across Python
+  3.11–3.13 (`.github/workflows/ci.yml`); extend it as the suite grows.
 
 ---
 
