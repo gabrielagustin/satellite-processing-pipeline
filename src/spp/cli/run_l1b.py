@@ -49,8 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="DN at/above which a pixel is flagged as saturated (default: off).",
     )
     parser.add_argument(
-        "--quicklook", action="store_true",
-        help="Also write an RGB quicklook PNG (needs the R, G, B bands).",
+        "--quicklook", action=argparse.BooleanOptionalAction, default=True,
+        help="Write an RGB quicklook PNG (default: on; needs the R, G, B bands).",
     )
     parser.add_argument(
         "--stac", action=argparse.BooleanOptionalAction, default=True,

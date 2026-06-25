@@ -184,3 +184,44 @@ almost unchanged — invisible to scalar QA. The timestamped model corrects it.
 Verified on the real scene (per-line radiance comparison) and covered by unit
 tests (`tests/test_package_reader.py` for the timestamp→line mapping,
 `tests/test_l1b_calibrator.py` for the interpolation).
+
+---
+
+## 12. Keep both `requirements.txt` and `pyproject.toml`
+
+**Alternatives.** Ship only one: a bare `requirements.txt` (as the challenge
+asked for), or only `pyproject.toml`.
+
+**Choice.** Keep both, with `pyproject.toml` as the **packaging source of
+truth** — it declares the runtime dependencies, the `test` extra and the
+`spp-l1b` console script, and enables an editable install (`pip install -e .`).
+`requirements.txt` is retained because the challenge requested it, kept as a thin
+**mirror of the runtime dependencies** for convenience and for tooling that
+expects one.
+
+**Trade-offs.** Two dependency lists to keep in sync, but the duplication is
+small (three runtime packages) and bounded: the `test` extra and the entry point
+live only in `pyproject.toml`, so `pip install -e .` alone is sufficient to
+install and run. `requirements.txt` mirrors the full runtime set (`numpy`,
+`rasterio`, `matplotlib`), so either install path yields the same working tool.
+
+---
+
+## 13. Quicklook on by default; `matplotlib` a core dependency
+
+**Alternatives.** Keep the RGB quicklook opt-in (`--quicklook`) with `matplotlib`
+as an optional `viz` extra — lighter base install, but a default run produces no
+visual output.
+
+**Choice.** Produce the quicklook **by default** (`--quicklook` /
+`--no-quicklook`, mirroring `--stac`), and promote `matplotlib` to a **core
+dependency**. A first run out of the box then yields a human-readable RGB PNG
+alongside the rasters, QA report and STAC item — what a reviewer most wants to
+see — with no extra install step or flag.
+
+**Trade-offs.** Every install now pulls `matplotlib` (a non-trivial dependency)
+even for purely programmatic use, and it reverses the earlier "matplotlib is
+optional" framing. Judged worth it: the quicklook is part of how the product
+demonstrates correctness, the cost is one well-established package, and the
+default stays overridable (`--no-quicklook`). The quicklook still skips
+gracefully (with a warning) when the R/G/B bands are absent.

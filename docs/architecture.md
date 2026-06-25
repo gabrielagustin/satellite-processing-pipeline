@@ -27,7 +27,7 @@ acquisition package (filesystem)
         │       ─► GeoTIFFWriter.write_block(radiance, line_start)
         │       ─► RadiometricValidator accumulator.update(radiance, dn)
         ▼
-   Product  +  qa_report.json  +  STAC item  (+ quicklook.png)
+   Product  +  qa_report.json  +  STAC item  +  quicklook.png
 ```
 
 Stages communicate through the core domain entities, never through ad-hoc dicts.
@@ -103,8 +103,8 @@ swapped or tested in isolation.
 ### CLI — `cli/`
 
 `run_l1b` (`spp-l1b`) parses arguments, builds the pipeline, writes the band
-rasters + `qa_report.json` (+ optional quicklook) and returns an exit code driven
-by the QA result.
+rasters + `qa_report.json` (plus a STAC item and an RGB quicklook, both on by
+default) and returns an exit code driven by the QA result.
 
 ---
 

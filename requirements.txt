@@ -1,5 +1,6 @@
+# Runtime dependencies — mirror of [project.dependencies] in pyproject.toml,
+# which is the packaging source of truth. Kept as a requirements.txt for
+# convenience and for tooling that expects one.
 numpy>=1.24
 rasterio>=1.3
-
-# Optional (quicklooks / visual QA)
 matplotlib>=3.6
