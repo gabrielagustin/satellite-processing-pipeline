@@ -27,7 +27,7 @@ acquisition package (filesystem)
         │       ─► GeoTIFFWriter.write_block(radiance, line_start)
         │       ─► RadiometricValidator accumulator.update(radiance, dn)
         ▼
-   Product  +  qa_report.json  +  STAC item  (+ quicklook.png)
+   Product  +  qa_report.json  +  STAC item  +  quicklook.png
 ```
 
 Stages communicate through the core domain entities, never through ad-hoc dicts.
