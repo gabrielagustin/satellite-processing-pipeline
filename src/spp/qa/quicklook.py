@@ -95,11 +95,8 @@ def _stretch(channel: np.ndarray, p_low: float, p_high: float) -> np.ndarray:
 
 def _save_png(rgb_uint8: np.ndarray, out_path: Path) -> None:
     """Save an HxWx3 uint8 array as a PNG."""
-    try:
-        from matplotlib import image as mpimage
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise ImportError(
-            "Quicklook generation needs matplotlib. "
-            "Install it with: pip install 'satellite-processing-pipeline[viz]'"
-        ) from exc
+    # Imported lazily so the QA layer stays import-light; matplotlib is a core
+    # dependency, so the import is guaranteed to succeed.
+    from matplotlib import image as mpimage
+
     mpimage.imsave(out_path, rgb_uint8)
