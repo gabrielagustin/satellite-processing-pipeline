@@ -13,6 +13,7 @@ left on disk and read in windows by downstream stages.
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 from pathlib import Path
 
@@ -197,10 +198,20 @@ class PackageReader(Reader):
             if not path.exists():
                 continue  # e.g. the 'raw' asset references a file not shipped
             band_id = name_to_id.get(name)
+            if band_id is None:
+                # Without a detector id the band cannot be matched to a
+                # calibration entry (lookup is keyed by id-derived start_row/tdi);
+                # skip it rather than fabricate a -1 id that would silently index
+                # the wrong calibration row.
+                logging.getLogger(__name__).warning(
+                    "Skipping band %r: not present in the filter map, so it has "
+                    "no detector id and cannot be calibrated.",
+                    name,
+                )
+                continue
             cwl = (
                 float(imager_config.band_cwl[band_id])
-                if band_id is not None
-                and band_id < len(imager_config.band_cwl)
+                if band_id < len(imager_config.band_cwl)
                 else float("nan")
             )
             with warnings.catch_warnings():
@@ -211,7 +222,7 @@ class PackageReader(Reader):
                     nodata = ds.nodata
             bands[name] = Band(
                 name=name,
-                band_id=band_id if band_id is not None else -1,
+                band_id=band_id,
                 cwl_nm=cwl,
                 path=path,
                 width=width,
@@ -258,6 +269,16 @@ class PackageReader(Reader):
         temps_arr = np.asarray(temps, dtype=np.float64)
         times_arr = np.asarray(times, dtype=np.float64)
         if times_arr.size and np.isnan(times_arr).any():
+            # Drop timing entirely if any sample lacks an ImagerTime: a partial
+            # timeline cannot be anchored reliably, so the calibrator falls back
+            # to uniform spreading. Warn so the accuracy downgrade is not silent.
+            n_missing = int(np.isnan(times_arr).sum())
+            logging.getLogger(__name__).warning(
+                "Discarding detector-temperature timing: %d of %d samples lack "
+                "an ImagerTime; using uniform-spacing interpolation instead.",
+                n_missing,
+                times_arr.size,
+            )
             times_arr = np.asarray([], dtype=np.float64)  # incomplete timing
         return temps_arr, times_arr
 
