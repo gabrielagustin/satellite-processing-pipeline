@@ -101,3 +101,9 @@ naive statistics) can propagate it or skew results.
 - **Parallelism.** Bands are independent — process them concurrently
   (multiprocessing/Dask) to cut wall-clock time.
 - **Detector artefacts.** Add dead/hot-pixel interpolation and de-striping.
+- **Structured logging.** The stages emit `logging` warnings (e.g. dropped
+  temperature timing, skipped bands), but there is no centralised setup yet —
+  add a configured root logger with a consistent format, wired to logging levels
+  (extending the existing `--quiet` and adding a `--verbose`), so
+  provenance-relevant events are captured rather than relying on the default
+  last-resort handler.
