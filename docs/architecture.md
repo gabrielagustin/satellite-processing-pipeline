@@ -103,8 +103,8 @@ swapped or tested in isolation.
 ### CLI — `cli/`
 
 `run_l1b` (`spp-l1b`) parses arguments, builds the pipeline, writes the band
-rasters + `qa_report.json` (+ optional quicklook) and returns an exit code driven
-by the QA result.
+rasters + `qa_report.json` (plus a STAC item and an RGB quicklook, both on by
+default) and returns an exit code driven by the QA result.
 
 ---
 

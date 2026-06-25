@@ -40,12 +40,11 @@ source .venv/bin/activate
 pip install -e .            # runtime deps + the `spp-l1b` command
 ```
 
-Core dependencies: `numpy`, `rasterio`. Quicklook generation additionally needs
-`matplotlib` (`pip install -e '.[viz]'`); for the test suite,
-`pip install -e '.[test]'`.
+Core dependencies: `numpy`, `rasterio`, `matplotlib` (the RGB quicklook is on by
+default). For the test suite, `pip install -e '.[test]'`.
 
 Dependencies are declared in `pyproject.toml` (the packaging source of truth,
-which also registers the `spp-l1b` command and the `viz` / `test` extras). A
+which also registers the `spp-l1b` command and the `test` extra). A
 `requirements.txt` mirroring the runtime deps is also provided for convenience
 and for environments that expect one (`pip install -r requirements.txt`);
 installing the package with `pip install -e .` alone is sufficient.
@@ -58,9 +57,11 @@ Calibrate an acquisition package to L1B radiance:
 
 ```bash
 spp-l1b --input  /path/to/acquisition_package \
-        --output /path/to/output_dir \
-        --quicklook
+        --output /path/to/output_dir
 ```
+
+This writes the band rasters, a QA report, a STAC item and an RGB quicklook
+(disable the last two with `--no-stac` / `--no-quicklook`).
 
 Or without installing:
 
@@ -94,7 +95,7 @@ Written to the output directory:
 - `<scene_id>_L1B.json` — a STAC item cataloguing the product (band assets,
   spectral/raster properties, processing lineage; `geometry` is `null` because
   L1B is not yet georeferenced). On by default; disable with `--no-stac`;
-- `quicklook.png` — RGB preview (with `--quicklook`).
+- `quicklook.png` — RGB preview. On by default; disable with `--no-quicklook`.
 
 ### Options
 
@@ -103,7 +104,7 @@ Written to the output directory:
 | `--bands B G R ...` | Process a subset of bands (default: all) |
 | `--window-lines N` | Along-track lines per processing window (default 2048) |
 | `--saturation-dn N` | Flag DN ≥ N as saturated (default: off) |
-| `--quicklook` | Also write an RGB quicklook PNG |
+| `--quicklook` / `--no-quicklook` | Write an RGB quicklook PNG (default: on) |
 | `--stac` / `--no-stac` | Write a STAC item for the product (default: on) |
 | `--quiet` | Only print the final summary |
 

@@ -193,15 +193,35 @@ tests (`tests/test_package_reader.py` for the timestamp→line mapping,
 asked for), or only `pyproject.toml`.
 
 **Choice.** Keep both, with `pyproject.toml` as the **packaging source of
-truth** — it declares the runtime dependencies, the optional extras (`viz`,
-`test`) and the `spp-l1b` console script, and enables an editable install
-(`pip install -e .`). `requirements.txt` is retained because the challenge
-requested it, kept as a thin **mirror of the runtime dependencies** for
-convenience and for tooling that expects one.
+truth** — it declares the runtime dependencies, the `test` extra and the
+`spp-l1b` console script, and enables an editable install (`pip install -e .`).
+`requirements.txt` is retained because the challenge requested it, kept as a thin
+**mirror of the runtime dependencies** for convenience and for tooling that
+expects one.
 
 **Trade-offs.** Two dependency lists to keep in sync, but the duplication is
-small (two packages) and bounded: the extras and the entry point live only in
-`pyproject.toml`, so `pip install -e .` alone is sufficient to install and run.
-To avoid a contradiction, the optional `matplotlib` is **not** an active line in
-`requirements.txt` (it is the `viz` extra: `pip install -e '.[viz]'`), so the
-base install matches the "matplotlib is optional" framing.
+small (three runtime packages) and bounded: the `test` extra and the entry point
+live only in `pyproject.toml`, so `pip install -e .` alone is sufficient to
+install and run. `requirements.txt` mirrors the full runtime set (`numpy`,
+`rasterio`, `matplotlib`), so either install path yields the same working tool.
+
+---
+
+## 13. Quicklook on by default; `matplotlib` a core dependency
+
+**Alternatives.** Keep the RGB quicklook opt-in (`--quicklook`) with `matplotlib`
+as an optional `viz` extra — lighter base install, but a default run produces no
+visual output.
+
+**Choice.** Produce the quicklook **by default** (`--quicklook` /
+`--no-quicklook`, mirroring `--stac`), and promote `matplotlib` to a **core
+dependency**. A first run out of the box then yields a human-readable RGB PNG
+alongside the rasters, QA report and STAC item — what a reviewer most wants to
+see — with no extra install step or flag.
+
+**Trade-offs.** Every install now pulls `matplotlib` (a non-trivial dependency)
+even for purely programmatic use, and it reverses the earlier "matplotlib is
+optional" framing. Judged worth it: the quicklook is part of how the product
+demonstrates correctness, the cost is one well-established package, and the
+default stays overridable (`--no-quicklook`). The quicklook still skips
+gracefully (with a warning) when the R/G/B bands are absent.
