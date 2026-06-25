@@ -110,9 +110,9 @@ Written to the output directory:
 
 ### Approximate runtime
 
-A full 8-band acquisition of ~4096 × 31000 pixels processes in **~1–2 minutes** on
-a laptop, producing ~4 GB of `float32` output. Memory stays flat (windowed
-streaming), independent of raster size.
+A full 8-band acquisition of ~4096 × 30948 pixels processes in **~2 minutes** on
+a laptop (≈13–18 s per band), producing ~4 GB of `float32` output. Memory stays
+flat (windowed streaming), independent of raster size.
 
 ---
 
