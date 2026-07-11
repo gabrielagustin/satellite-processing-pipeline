@@ -18,7 +18,12 @@ import logging
 
 import numpy as np
 
-from spp.geometry.camera import BandOptics, Camera, CameraIntrinsics
+from spp.geometry.camera import (
+    UNPOPULATED_LOS_SENTINEL,
+    BandOptics,
+    Camera,
+    CameraIntrinsics,
+)
 from spp.geometry.ephemeris import Attitude, Ephemeris
 from spp.geometry.timing import LineTiming, line_timing_from_exposures
 
@@ -208,6 +213,20 @@ def camera_from_package(
         )
         for name, start_row in band_start_rows.items()
     }
+
+    unpopulated = sorted(
+        name
+        for name, optics in bands.items()
+        if tuple(optics.los_along) == UNPOPULATED_LOS_SENTINEL
+        or tuple(optics.los_across) == UNPOPULATED_LOS_SENTINEL
+    )
+    if unpopulated:
+        logger.warning(
+            "Line-of-sight calibration is unpopulated in the delivered file for %s "
+            "(a constant 1 rad offset is not a physical correction); using zero. It is "
+            "estimated from band co-registration.",
+            ", ".join(unpopulated),
+        )
 
     boresight = geometric_calibration.get("boreSightAlignment")
     return Camera(

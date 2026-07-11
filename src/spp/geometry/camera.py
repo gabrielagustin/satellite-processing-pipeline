@@ -150,23 +150,6 @@ class Camera:
         if self.boresight.shape != (3, 3):
             raise ValueError(f"boresight must be 3x3, got {self.boresight.shape}")
 
-        # Report the unpopulated calibration once, here. It is a property of the
-        # delivered file, not of any particular ray, and warning per-evaluation buries
-        # everything else in the log.
-        unpopulated = sorted(
-            name
-            for name, optics in bands.items()
-            if tuple(optics.los_along) == UNPOPULATED_LOS_SENTINEL
-            or tuple(optics.los_across) == UNPOPULATED_LOS_SENTINEL
-        )
-        if unpopulated:
-            logger.warning(
-                "Line-of-sight calibration is unpopulated for %s (a constant 1 rad "
-                "offset is not a physical correction); using zero. It can be estimated "
-                "from band co-registration.",
-                ", ".join(unpopulated),
-            )
-
     # -- public API ---------------------------------------------------------
 
     def view_angles(self, band: str, columns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

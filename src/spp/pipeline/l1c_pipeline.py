@@ -32,7 +32,7 @@ from spp.geometry.frames import ecef_to_geodetic, eci_to_ecef_matrix
 from spp.geometry.sensor_model import Convention, SensorModel
 from spp.geometry.terrain import DEMTerrain, EllipsoidTerrain, TerrainModel
 from spp.geometry.timing import LineTiming
-from spp.refine import matcher, relative, scene
+from spp.refine import absolute, matcher, relative, scene
 from spp.resample.grid import TargetGrid, native_gsd
 from spp.resample.warper import GeolocWarper
 
@@ -116,6 +116,7 @@ class L1CPipeline:
         reference_band: str = "PAN",
         refine: bool = True,
         resolve_parities: bool = True,
+        correct_absolute: bool = True,
         scene_correct: bool = True,
         stack: bool = True,
         gsd_m: float | None = None,
@@ -130,6 +131,7 @@ class L1CPipeline:
         self.reference_band = reference_band
         self.refine = refine
         self.resolve_parities = resolve_parities
+        self.correct_absolute = correct_absolute
         self.scene_correct = scene_correct
         self.stack = stack
         self.gsd_m = gsd_m
@@ -175,6 +177,9 @@ class L1CPipeline:
         }
         if not (parity_report and parity_report.get("decisive")):
             qa["flags"].append("conventions_assumed")
+
+        if self.correct_absolute and isinstance(self.terrain, DEMTerrain):
+            self._correct_absolute(paths, bands, qa)
 
         model = self.model
         matches: dict[str, list] = {}
@@ -266,6 +271,61 @@ class L1CPipeline:
             self.camera, self.ephemeris, self.attitude, self.timing,
             band=band, image=image, terrain=self.terrain, base=self.convention,
         )
+
+    def _correct_absolute(self, paths: dict[str, Path], bands: list[str], qa: dict) -> None:
+        """Correct the pointing bias against the terrain -- the only external reference here.
+
+        Without a satellite-navigation lock this bias is expected, and on the reference
+        acquisition it is about a kilometre. Nothing else in this level can see it: the
+        bands are co-registered onto *each other*, and the delivered footprint was derived
+        from the same telemetry the model consumes. The terrain's coastline is the one
+        reference in the run that the telemetry did not produce.
+        """
+        band = next((b for b in ("NIR", "RE3", "RE2", "R") if b in bands), bands[0])
+        logger.info("Correcting absolute geolocation against the terrain (%s)...", band)
+        with rasterio.open(paths[band]) as src:
+            image = src.read(1)
+
+        ground_speed = self._ground_speed()
+        correction = absolute.estimate(
+            self.model, band, image, self.terrain, ground_speed_m_s=ground_speed
+        )
+        qa["absolute"] = {
+            "offset_before_m": round(correction.offset_before_m, 1),
+            "roll_urad": round(correction.roll_rad * 1e6, 1),
+            "pitch_urad": round(correction.pitch_rad * 1e6, 1),
+            "equivalent_clock_offset_s": round(correction.equivalent_clock_offset_s, 4),
+            "peak": round(correction.peak, 4),
+            "fitted": correction.fitted,
+            "reason": correction.reason,
+            "note": (
+                "The along-track correction is equally explained by a clock offset; the "
+                "two are not separable from one strip. Attributing it to pitch is a "
+                "convention, not a measurement."
+            ),
+        }
+        if not correction.fitted:
+            return
+
+        self.model = absolute._with_boresight(
+            self.model, roll=correction.roll_rad, pitch=correction.pitch_rad
+        )
+        self.camera = self.model.camera
+        # The bias is corrected, but it is corrected against a *coastline in an
+        # elevation model*, not against an orthoimage. That is a real reference and a
+        # limited one: it is good to the DEM's own resolution and to how sharply the
+        # shoreline is defined -- tens of metres, not sub-pixel. Replacing one honest
+        # caveat with silence would be worse than the bias.
+        if "absolute_accuracy_unvalidated" in qa["flags"]:
+            qa["flags"].remove("absolute_accuracy_unvalidated")
+        qa["flags"].append("absolute_accuracy_terrain_only")
+
+    def _ground_speed(self) -> float:
+        """Speed of the sub-satellite point, from the ephemeris."""
+        mid = float(np.median(self.ephemeris.times))
+        position, velocity = self.ephemeris.interpolate(np.array([mid]))
+        radius = float(np.linalg.norm(position[0]))
+        return float(np.linalg.norm(velocity[0]) * 6_371_008.8 / radius)
 
     def _scene_correct(
         self, model: SensorModel, grids: dict, matches: dict, qa: dict

@@ -70,6 +70,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "defaults. Only sensible if the scene has no land/water contrast.",
     )
     parser.add_argument(
+        "--no-absolute-correction",
+        action="store_true",
+        help="Do not correct the absolute pointing bias against the terrain. The product "
+        "keeps whatever geolocation bias the telemetry carries (~1 km without a "
+        "navigation lock).",
+    )
+    parser.add_argument(
         "--no-scene-correction",
         action="store_true",
         help="Skip the scene-local (attitude) correction. The instrument calibration is "
@@ -182,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         reference_band=args.reference_band,
         refine=not args.no_refine,
         resolve_parities=not args.no_parity_check,
+        correct_absolute=not args.no_absolute_correction,
         scene_correct=not args.no_scene_correction,
         stack=not args.no_stack,
         gsd_m=args.gsd,
@@ -224,6 +232,18 @@ def _summarise(result) -> None:
         for band, value in refused.items():
             print(f"       {band:5s} REFUSED — {value['reason']}")
 
+    absolute_qa = qa.get("absolute")
+    if absolute_qa and absolute_qa.get("fitted"):
+        print()
+        print("  absolute geolocation (against the terrain's coastline — the only")
+        print("  reference in this run the telemetry did not produce):")
+        print(f"       offset before   {absolute_qa['offset_before_m']:.0f} m")
+        print(f"       boresight       roll {absolute_qa['roll_urad']:+.0f} urad, "
+              f"pitch {absolute_qa['pitch_urad']:+.0f} urad")
+        print(f"       NOTE: the along-track part is equally explained by a clock offset "
+              f"of {absolute_qa['equivalent_clock_offset_s']:+.3f} s.")
+        print( "             They are not separable from one strip; pitch is a convention.")
+
     scene_correction = qa.get("scene_correction", {})
     fitted_scene = [b for b, v in scene_correction.items() if isinstance(v, dict) and v.get("fitted")]
     if fitted_scene:
@@ -246,7 +266,13 @@ def _summarise(result) -> None:
             ),
             "conventions_assumed": (
                 "two telemetry conventions (scan direction, column sign) are mirrors that "
-                "geometry cannot see; they are assumed"
+                "geometry cannot see, and the terrain could not settle them either"
+            ),
+            "absolute_accuracy_terrain_only": (
+                "the pointing bias was corrected against a coastline in the elevation "
+                "model -- a real independent reference, but good only to the DEM's "
+                "resolution and the shoreline's sharpness (tens of metres). It has NOT "
+                "been checked against a reference orthoimage"
             ),
             "coregistration_not_achieved": (
                 "one or more bands could not be co-registered — see the refusals above"
