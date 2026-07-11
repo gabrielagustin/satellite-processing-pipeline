@@ -178,7 +178,7 @@ half the error is not constant.
 
 ---
 
-## 3. The four things that make this level hard
+## 3. What makes this level hard
 
 ### 3.1 The attitude reference frame is not documented
 
@@ -381,6 +381,18 @@ These need **image content**, not geometry: matching against a reference orthoim
 the values above are recorded as **assumptions, flagged as such** in the quality
 report. A harness that reported them as "resolved" would be manufacturing a result.
 
+### 4.4 Deliverable
+
+`tests/test_geometry_conventions.py` builds a **synthetic** acquisition with a
+known convention — circular orbit, yaw-steered platform, bands staggered exactly
+as a real product staggers them — and asserts that the harness recovers the five
+resolvable axes and **admits** it cannot see the three parities. The synthetic is
+what makes this a test of the harness rather than of the scene.
+
+The resolution is recorded in [`decision_log.md`](decision_log.md).
+
+---
+
 ### 4.5 Two modelling errors the harness then exposed *(Phase 1)*
 
 Resolving the conventions left a **32.8 km** footprint error, which looked exactly
@@ -416,16 +428,6 @@ what the data contains.
 The lesson generalises, and it is the reason both bugs are recorded here rather than
 quietly patched: **a "refinement" that is not validated against the data can make a
 model worse, and it will look like an irreducible bias while it does.**
-
-### 4.4 Deliverable
-
-`tests/test_geometry_conventions.py` builds a **synthetic** acquisition with a
-known convention — circular orbit, yaw-steered platform, bands staggered exactly
-as a real product staggers them — and asserts that the harness recovers the five
-resolvable axes and **admits** it cannot see the three parities. The synthetic is
-what makes this a test of the harness rather than of the scene.
-
-The resolution is recorded in [`decision_log.md`](decision_log.md).
 
 ---
 

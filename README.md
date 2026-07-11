@@ -21,7 +21,7 @@ processing engine.
 |------|--------|--------|
 | L0 / L1A | Per-band DN rasters (sensor coords) | Ingested |
 | **L1B** | **TOA spectral radiance** | **Implemented** |
-| L1C | Georeferenced / orthorectified radiance | Fully specified — [`docs/l1c_spec.md`](docs/l1c_spec.md) |
+| L1C | Georeferenced / orthorectified radiance | **Partly implemented** — georeferencing and orthorectification work; band co-registration does not yet. See [`docs/l1c_spec.md`](docs/l1c_spec.md) and [`docs/limitations.md`](docs/limitations.md) |
 | L2A | Surface reflectance | Specified |
 
 See [`docs/product_hierarchy.md`](docs/product_hierarchy.md) for the full
@@ -142,6 +142,8 @@ satellite-processing-pipeline/
 │   ├── core/          # domain entities (Band, Acquisition, Calibration, Product)
 │   ├── readers/       # package discovery and parsing -> Acquisition
 │   ├── calibration/   # radiometric calibration (L1B)
+│   ├── geometry/      # sensor model, frames, terrain (L1C)
+│   ├── resample/      # target grid + geolocation-array warp (L1C)
 │   ├── qa/            # quality assessment + quicklook
 │   ├── products/      # raster writers (GeoTIFF)
 │   ├── pipeline/      # orchestration (L1B pipeline)
@@ -161,6 +163,7 @@ satellite-processing-pipeline/
 | [product_hierarchy.md](docs/product_hierarchy.md) | L0→L2 levels: inputs, outputs, justification |
 | [remaining_levels.md](docs/remaining_levels.md) | Specs for L1A, L1C, L2A |
 | [l1c_spec.md](docs/l1c_spec.md) | L1C geometric design: sensor model, orthorectification, band co-registration |
+| [l1c_findings.md](docs/l1c_findings.md) | What measurement overturned: five assumptions, and how each was caught |
 | [decision_log.md](docs/decision_log.md) | Engineering decisions and trade-offs |
 | [limitations.md](docs/limitations.md) | Failure modes and next steps |
 | [validation_strategy.md](docs/validation_strategy.md) | How correctness is established |

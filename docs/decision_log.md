@@ -383,3 +383,50 @@ that would still deserve a second look.
 **Related.** This is the same discipline as entries 15 and 16: an unvalidated
 assumption about the input does not announce itself. It presents as a plausible
 result, and only a check that could have failed distinguishes the two.
+
+---
+
+## 18. Write exit criteria that can fail
+
+**Context.** The L1C level was planned in phases, each with an exit criterion. The
+Phase 3 criterion was written as: *"eight bands on one grid, and the band residual
+has fallen below the 1–7 px it starts at. This is the test that the model is real:
+if the residual does not shrink, stop — the model is wrong, and no amount of
+refinement will save it."*
+
+**Alternatives.** The obvious criterion — *"the products are produced"* — would have
+been met. The geolocation grid built, the interpolation error came in at 0.026 px
+against a 0.1 px budget, every node found the ground, and eight bands landed on one
+projected grid. By any check of the machinery, the phase succeeded.
+
+**What happened.** The criterion failed. Warping through the physical model left the
+band residual exactly where it started: 30.2 m before, 33.2 m after. The model turned
+out to carry a per-band error of its own — a constant (−5.1, +6.5) px — which is the
+*same size* as the misregistration it was meant to remove.
+
+**Why the criterion earned its place.** Its real job was to distinguish a **missing
+calibration** from a **modelling bug**, because feeding the residual back into the
+model (the Phase 4 self-calibration) would paper over either one indiscriminately. The
+discriminator is whether the residual varies with position: correlations with
+along-track and cross-track position came out at −0.09, −0.05, +0.01 and −0.17 — none.
+A residual constant across the whole strip and the whole swath is a fixed angular
+offset per band, which is the interior orientation, which is precisely the line-of-sight
+term the calibration file ships unpopulated.
+
+So the self-calibration is legitimate — but the **phasing was wrong**. Phase 4 is not a
+refinement that polishes good co-registration into sub-pixel co-registration; it is the
+prerequisite for co-registration existing at all. That is now recorded in
+[`l1c_spec.md`](l1c_spec.md) §14.1.
+
+**Choice.** Keep writing criteria that can fail, and state the *number* they must beat
+rather than the artefact they must produce. A criterion phrased as an output ("the file
+exists", "the pipeline runs", "the products are produced") cannot distinguish a working
+model from a broken one — it can only distinguish a working model from a crash.
+
+**Trade-offs.** A failing criterion costs a phase's worth of schedule and forces the
+plan to be rewritten in public. That is the price, and it is small: the alternative was
+shipping a product whose bands do not align, discovering it somewhere downstream, and
+having no record of which stage was responsible.
+
+**Related.** The same discipline, applied to inputs rather than phases, is entries 15,
+16 and 17. The full narrative is in [`l1c_findings.md`](l1c_findings.md).

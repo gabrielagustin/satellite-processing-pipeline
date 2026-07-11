@@ -107,3 +107,76 @@ naive statistics) can propagate it or skew results.
   (extending the existing `--quiet` and adding a `--verbose`), so
   provenance-relevant events are captured rather than relying on the default
   last-resort handler.
+
+---
+
+## L1C — the geometric level
+
+The level is **partly implemented**, and the parts are not equally finished. What
+follows is the product's real state, stated plainly, because every gap below produces a
+file that *looks* correct: it opens in any geographic information system, it overlays a
+basemap, the bands stack without complaint.
+
+| Capability | State |
+|---|---|
+| Georeferencing | **Works.** Reproduces the delivered footprint to 208 m |
+| Orthorectification | **Works.** Terrain intersection converges everywhere; the geoid datum is handled and checked |
+| Band co-registration | **Does not work.** The bands are still ~8 px apart |
+| Absolute accuracy | **Unvalidated** against anything independent of the telemetry |
+
+### Band co-registration does not yet work
+
+Resampling through the physical model left the band residual where it started: 30.2 m
+before, 33.2 m after. The model carries a per-band error of its own — a constant
+(−5.1, +6.5) px — the same size as the misregistration it was meant to remove.
+
+The cause is diagnosed, not merely suspected: the residual is **constant across the
+whole strip and the whole swath** (correlations with along-track and cross-track
+position: −0.09, −0.05, +0.01, −0.17). A residual that does not vary with position is a
+fixed angular offset per band — the **interior orientation** — which is precisely the
+per-band line-of-sight term the Calibration Parameter File ships unpopulated. Eight
+detector pixels of offset is an ordinary amount of optical distortion for an instrument
+whose geometric calibration was never filled in.
+
+**Next step.** Estimate the missing calibration from the imagery (the self-calibration
+of [`l1c_spec.md`](l1c_spec.md) §8.2). It is not a refinement; it is the prerequisite.
+
+### Absolute accuracy is unvalidated
+
+The model reproduces the delivered footprint to 208 m — but that footprint was almost
+certainly derived by the provider from the **same telemetry** the model consumes, so the
+agreement validates the implementation and says nothing about the orbit. Nothing in the
+package is independent of the ephemeris it would have to check.
+
+The acquisition also has **no satellite-navigation lock**: its positions are propagated,
+not measured.
+
+**Next step.** Match against an external reference orthoimage
+([`l1c_spec.md`](l1c_spec.md) §8.1). Until then the product carries the
+`absolute_accuracy_unvalidated` flag, and any absolute figure quoted from it would be
+false precision.
+
+### Two telemetry conventions are assumed, not resolved
+
+The scan direction (a north–south mirror) and the detector column sign (an east–west
+mirror) cannot be determined from geometry. Both map the footprint's corners onto each
+other *and* displace every band identically, so every geometric probe returns
+bit-identical scores. They are **provably invisible** to the model and need image
+content to settle. They are carried as declared assumptions and flagged.
+
+A product that is silently mirrored is much harder to catch than one that says it might
+be.
+
+### The warp is not memory-bounded
+
+L1B streams in windows and its peak memory is independent of strip height. **The L1C
+warper is not**: it holds the whole source band (~507 MB) and the whole destination
+(~1.15 GB) in memory, so it uses ~1.7 GB per band and grows with the strip. Workable at
+this scale, not at the next. See [`performance.md`](performance.md).
+
+### Not yet built
+
+- A `spp-l1c` command-line entry point (the level currently runs as a library).
+- The geometric section of `qa_report.json` is **specified** ([`qa_report.md`](qa_report.md))
+  but not yet emitted.
+- A STAC item and a map-projected quicklook for the L1C product.
