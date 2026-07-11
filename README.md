@@ -39,11 +39,15 @@ Requires Python 3.11+.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .            # runtime deps + the `spp-l1b` command
+pip install -e .            # runtime deps + the `spp-l1b` and `spp-l1c` commands
 ```
 
 Core dependencies: `numpy`, `rasterio`, `matplotlib` (the RGB quicklook is on by
-default). For the test suite, `pip install -e '.[test]'`.
+default) and `pyproj` (coordinate systems and the geoid, used by L1C). For the test
+suite, `pip install -e '.[test]'`.
+
+L1C fetches its elevation model and geoid grid over the network on first use; both are
+cached, and `--dem` accepts a local one.
 
 Dependencies are declared in `pyproject.toml` (the packaging source of truth,
 which also registers the `spp-l1b` command and the `test` extra). A
@@ -53,7 +57,7 @@ installing the package with `pip install -e .` alone is sufficient.
 
 ---
 
-## How to run
+## L1B — calibrate to radiance
 
 Calibrate an acquisition package to L1B radiance:
 
@@ -71,48 +75,7 @@ Or without installing:
 PYTHONPATH=src python -m spp.cli.run_l1b --input <package> --output <out>
 ```
 
-### L1C — georeference, orthorectify and co-register
-
-Takes the acquisition package (for the platform telemetry and the calibration) and the
-**L1B rasters** (for the pixels):
-
-```bash
-spp-l1c --input  /path/to/acquisition_package \
-        --l1b    /path/to/l1b_output \
-        --output /path/to/l1c_output
-```
-
-The elevation model is fetched automatically from Copernicus GLO-30 over the network —
-no account, no manual download. Supply your own with `--dem <raster-or-vrt>`, or skip
-terrain entirely with `--no-dem` (which georeferences but does **not** orthorectify, and
-says so).
-
-Writes one projected `float32` radiance raster per band on a common UTM grid, plus
-`qa_report_l1c.json`. A full 8-band run takes roughly 7 minutes and needs ~2 GB of RAM.
-Try two bands first:
-
-```bash
-spp-l1c --input <package> --l1b <l1b_out> --output <l1c_out> --bands PAN RE1
-```
-
-**Read the run's closing summary.** It ends with a section headed *NOT ESTABLISHED BY
-THIS RUN*, which lists what the product does **not** demonstrate — the absolute
-geolocation is unvalidated against anything independent of the telemetry, two telemetry
-conventions are assumed rather than resolved, and some bands may have been refused by the
-self-calibration. The rasters look finished whether or not any of that is true, which is
-why the run says it out loud. See [`docs/limitations.md`](docs/limitations.md).
-
-| Flag | Meaning |
-|---|---|
-| `--bands B G R ...` | Subset of bands (default: all) |
-| `--dem <path>` | Elevation raster or virtual mosaic (default: fetch Copernicus GLO-30) |
-| `--no-dem` | Georeference on the ellipsoid; do **not** orthorectify |
-| `--gsd N` | Output resolution in metres (default: the native sampling, rounded up) |
-| `--reference-band B` | Band the others co-register onto (default: `PAN`) |
-| `--no-refine` | Skip the self-calibration; the bands will **not** be co-registered |
-| `--step N` | Geolocation-lattice spacing in pixels (default 8, matched to the DEM) |
-
-### Expected input
+### L1B — expected input
 
 An acquisition package directory containing:
 
@@ -127,7 +90,7 @@ See [`docs/input_package.md`](docs/input_package.md) for the layout. Band files
 and calibration assets are **discovered** (via the STAC assets and glob
 patterns), so exact file names are not hard-coded.
 
-### Outputs
+### L1B — outputs
 
 Written to the output directory:
 
@@ -140,7 +103,7 @@ Written to the output directory:
   L1B is not yet georeferenced). On by default; disable with `--no-stac`;
 - `quicklook.png` — RGB preview. On by default; disable with `--no-quicklook`.
 
-### Options
+### L1B — options
 
 | Flag | Meaning |
 |---|---|
@@ -151,11 +114,91 @@ Written to the output directory:
 | `--stac` / `--no-stac` | Write a STAC item for the product (default: on) |
 | `--quiet` | Only print the final summary |
 
-### Approximate runtime
+### L1B — approximate runtime
 
 A full 8-band acquisition of ~4096 × 30948 pixels processes in **~2 minutes** on
 a laptop (≈13–18 s per band), producing ~4 GB of `float32` output. Memory stays
 flat (windowed streaming), independent of raster size.
+
+---
+
+## L1C — georeference, orthorectify, co-register
+
+Takes the **acquisition package** (for the platform telemetry and the calibration) *and*
+the **L1B rasters** (for the pixels). Both are required: the L1B GeoTIFFs carry only the
+radiance, not the ephemeris, attitude, per-line timestamps or camera geometry the
+geometric level needs.
+
+```bash
+spp-l1c --input  /path/to/acquisition_package \
+        --l1b    /path/to/l1b_output \
+        --output /path/to/l1c_output
+```
+
+The elevation model is fetched automatically from Copernicus GLO-30 over the network —
+no account, no manual download — and cached in the output directory. Supply your own with
+`--dem <raster-or-vrt>`, or skip terrain with `--no-dem` (which georeferences but does
+**not** orthorectify, and says so).
+
+### L1C — the reference band is mandatory
+
+The bands are co-registered **onto a reference band**, `PAN` by default. If you process a
+subset, **the reference band must be in it**:
+
+```bash
+spp-l1c ... --bands PAN R G B          # correct: PAN included
+spp-l1c ... --bands R G B              # runs, but the bands will NOT co-register
+```
+
+Without it the run still produces georeferenced, orthorectified rasters — it simply skips
+the self-calibration, raises `coregistration_not_achieved`, and says so in the summary.
+Override the reference with `--reference-band <BAND>`.
+
+### L1C — outputs
+
+Written to the output directory:
+
+- **`stack.tif`** — **the product.** One multi-band `float32` raster: every band on the
+  same projected grid, co-registered, with band names set. This is what to open.
+- `<BAND>.tif` — the same bands as individual rasters, for convenience.
+- `qa_report_l1c.json` — conventions used, grid, terrain, interpolation error,
+  per-band co-registration, the estimated line-of-sight calibration, and the flags.
+- `cache/dem.vrt` — the elevation mosaic that was fetched. Reuse it across runs with
+  `--dem`.
+
+### L1C — options
+
+| Flag | Meaning |
+|---|---|
+| `--bands B G R ...` | Subset of bands (default: all). **Must include the reference band** |
+| `--reference-band B` | Band the others co-register onto (default: `PAN`) |
+| `--dem <path>` | Elevation raster or virtual mosaic (default: fetch Copernicus GLO-30) |
+| `--no-dem` | Georeference on the ellipsoid; do **not** orthorectify |
+| `--gsd N` | Output resolution in metres (default: the native sampling, rounded up) |
+| `--no-refine` | Skip the self-calibration of the missing line-of-sight term |
+| `--no-scene-correction` | Skip the scene-local (attitude) correction |
+| `--no-stack` | Do not write `stack.tif` (per-band rasters only) |
+| `--step N` | Geolocation-lattice spacing in pixels (default 8, matched to the DEM) |
+| `--quiet` | Only print the final summary |
+
+### L1C — approximate runtime
+
+A full 8-band run takes roughly **10 minutes** and needs **~2 GB of RAM**, producing a
+~3.5 GB stack. Four bands take about 4 minutes. The warp is **not** memory-bounded (unlike
+L1B) — see [`docs/performance.md`](docs/performance.md).
+
+### L1C — read the closing summary
+
+The run ends with a section headed **NOT ESTABLISHED BY THIS RUN**. It lists what the
+product does *not* demonstrate: that the absolute geolocation has never been checked
+against anything independent of the telemetry that produced it, that two telemetry
+conventions are mirrors geometry cannot see and are therefore assumed, and which bands the
+self-calibration refused.
+
+The rasters open in any geographic information system and overlay a basemap plausibly
+whether or not any of that is true, which is exactly why the run says it out loud. Band
+co-registration currently reaches **2–3 px**, not the sub-pixel target; the floor is
+attitude jitter. See [`docs/limitations.md`](docs/limitations.md).
 
 ---
 
