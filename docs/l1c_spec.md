@@ -927,15 +927,54 @@ between them.
 | **0** | This spec + the convention harness (§4) | Frame, quaternion and scan conventions resolved and pinned by a test |
 | **1** ✅ | Frames, timing, ephemeris, camera; sensor model on the **ellipsoid** | ~~Computed footprint matches the STAC geometry within a few km~~ → **208 m**. Band coherence 18 m (4.8 px); model band offsets agree with the imagery to 3.1 px along-track, 5.8 px across. Six of eight conventions resolved |
 | **2** ✅ | DEM + geoid + iterative terrain intersection | ~~Intersection converges~~ → **100%**, within 2 iterations. Geoid undulation −32.3 to −24.6 m, with a guard against PROJ's silent zero. Stereo coefficient 0.01524 measured vs 0.0152 predicted. The DEM improves model-vs-imagery band agreement by **2.5 px over mountains** and **0.0 px over water** — acting only where terrain exists, which is the signature of a correct correction |
-| **3** | Geolocation grid + warp → **first L1C products** (model-only) | Eight bands on one grid, and the band residual has **fallen below the 1–7 px it starts at** (§2.4). This is the test that the model is real: if the residual does not shrink, stop — the model is wrong, and no amount of refinement will save it |
-| **4** | Relative refinement — self-calibrated per-band LoS (§8.2) | Band-to-band residual < 0.3 px, uncorrelated with terrain height |
+| **3** ⚠️ | Geolocation grid + warp → **first L1C products** (model-only) | Machinery **done and validated**: geolocation-grid interpolation error **0.026 px** (budget 0.1), 100% of nodes locate, products written to a UTM grid at 4.0 m. But the stated exit criterion — the band residual falls — **failed**: 30.2 m before, 33.2 m after. See §14.1 |
+| **4** | Relative refinement — self-calibrated per-band LoS (§8.2) | Band-to-band residual < 0.3 px, uncorrelated with terrain height. **Not optional** — it is the prerequisite for any co-registration at all (§14.1) |
 | **5** | Absolute refinement vs reference orthoimage (§8.1) | Absolute root-mean-square error reported against held-out check points |
 | **6** | Geometric QA report, STAC item, quicklook, tests, docs | QA schema complete; `spp-l1c` documented end-to-end |
 
-Phases 1–3 produce a usable, honest product on their own: georeferenced,
-orthorectified, physically co-registered, with its absolute error *measured and
-declared* rather than corrected. Phases 4–5 improve the accuracy; they are not
-prerequisites for a product.
+### 14.1 Phase 3 failed its exit criterion, and the phasing was wrong
+
+The plan above assumed Phase 3 would already improve band co-registration and that
+Phase 4 would polish it from "good" to "sub-pixel". **It cannot, and the exit
+criterion caught it.** Warping through the physical model left the band residual
+where it started: 30.2 m before, 33.2 m after.
+
+**Why.** The model carries a per-band error of its own, and it is the *same size* as
+the misregistration it is meant to remove. Measured against the imagery, the model
+places RE3 wrong by a constant **(−5.1, +6.5) px** — about 8 px, or 16 arcseconds,
+or ~8 detector pixels of line-of-sight offset. Nothing can be co-registered by a
+model that is itself 8 px wrong per band.
+
+**What it is, and what it is not.** The exit criterion exists to distinguish a
+missing *calibration* from a modelling *bug*, because feeding a residual back into
+the model would paper over either one indiscriminately. The discriminator is
+whether the residual **varies with position**:
+
+| | along-track corr. | cross-track corr. |
+|---|---:|---:|
+| line residual | −0.09 | −0.05 |
+| column residual | +0.01 | −0.17 |
+
+It does not. The residual is **constant across the whole strip and the whole swath**
+— which is the signature of a fixed angular offset per band, i.e. the interior
+orientation. That is precisely the per-band line-of-sight term the calibration file
+ships unpopulated (§3.3), and ~8 detector pixels is an entirely ordinary amount of
+optical distortion and detector placement for an instrument whose geometric
+calibration was never filled in.
+
+**So Phase 4 is legitimate, and it is not a refinement — it is a prerequisite.**
+The corrected sequence:
+
+- Phases 1–3 deliver a **georeferenced and orthorectified** product, with its
+  absolute error measured and declared. That is real and usable.
+- Band co-registration does **not** exist until Phase 4 estimates the calibration the
+  instrument did not ship. Phase 3 cannot deliver it, and the original plan claiming
+  otherwise was wrong.
+- Phase 5 (absolute refinement) remains an accuracy improvement, not a prerequisite.
+
+Had the exit criterion been written as "the products are produced", Phase 3 would
+have passed, and the missing co-registration would have been discovered — or not —
+somewhere much further downstream.
 
 ---
 
