@@ -353,3 +353,33 @@ polynomial coefficients, against a 150x reduction in geolocation error. No conte
 The residual 208 m is model-versus-model agreement, not absolute accuracy: the
 delivered footprint was almost certainly derived from the same telemetry, so it
 validates the implementation, not the orbit.
+
+---
+
+## 17. Demand a real geoid; refuse PROJ's silent "ballpark" fallback
+
+**Context.** A digital elevation model reports **orthometric** height (above the
+geoid); the platform ephemeris is referenced to the **ellipsoid**. Over the
+reference acquisition those differ by about **−31 m**. The conversion is a standard
+PROJ vertical transformation.
+
+**The trap.** Asked to convert without the geoid grid installed, PROJ does **not**
+raise. It performs what it calls a "ballpark vertical transformation", which returns
+the height unchanged — an undulation of exactly zero, everywhere. Nothing downstream
+notices: heights are finite, rays converge, the product looks correct, and every
+elevation is wrong by the local undulation. A silent, uniform, tens-of-metres error
+is exactly the kind that survives to production.
+
+**Choice.** Enable PROJ's network grid access, and **validate the result**:
+`terrain.check_undulation` rejects an undulation that is identically zero or
+non-finite, with an error message naming the cause and the fix. The geoid is not
+trusted because it was requested; it is trusted because it was checked.
+
+**Trade-offs.** A first run needs network access to fetch the grid (or a one-off
+`projsync`), and the check would false-positive on a scene where the true undulation
+really is zero everywhere — a set of measure zero on the actual geoid, and a case
+that would still deserve a second look.
+
+**Related.** This is the same discipline as entries 15 and 16: an unvalidated
+assumption about the input does not announce itself. It presents as a plausible
+result, and only a check that could have failed distinguishes the two.

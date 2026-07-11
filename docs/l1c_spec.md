@@ -258,10 +258,20 @@ These are unpopulated defaults, not a calibration.
 ### 3.4 The DEM matters for co-registration, not for absolute accuracy
 
 The instinct is that a DEM matters because terrain displaces pixels. For this
-long-focal-length, narrow-field instrument, that effect is *small*: the
-cross-track half-field is only **1.11°**, so a 10 m height error displaces a
-pixel by 10 · tan(1.11°) ≈ **0.19 m** — a twentieth of a pixel. Absolute
-orthorectification is barely DEM-sensitive.
+long-focal-length, narrow-field instrument, that effect is *small per metre of
+height*: the cross-track half-field is only **1.11°**, so a 10 m height error
+displaces a pixel by about **0.2 m** — a twentieth of a pixel.
+
+But the terrain in the reference scene reaches **3.2 km**, and small-per-metre is
+not the same as small. Measured against the real elevation model, the absolute
+relief displacement is 0.1 px over water and **8.9 px** in the 1–3.2 km band. So
+absolute orthorectification is DEM-sensitive after all — just not linearly-alarming
+in the way the flat framing suggested.
+
+*(A detail that matters at the 5% level: the angle in `h · tan(θ)` is the incidence
+angle **at the ground**, not the view angle at the platform. Earth's curvature tilts
+the local vertical between the two and magnifies the angle by `(R + alt)/R` = 1.063
+at 400 km. Every figure below carries that factor.)*
 
 But the **bands are separated by 0.82° of along-track view angle** (§2.4) — 37 %
 of the entire cross-track field of view. Two bands viewing the same terrain from
@@ -270,9 +280,15 @@ of the entire cross-track field of view. Two bands viewing the same terrain from
 
 | Terrain height | Relative band displacement | In pixels (3.77 m) |
 |---:|---:|---:|
-| 200 m | 2.8 m | 0.8 px |
-| 500 m | 7.1 m | 1.9 px |
-| 1500 m | 21.3 m | 5.6 px |
+| 200 m | 3.0 m | 0.8 px |
+| 500 m | 7.6 m | 2.0 px |
+| 1500 m | 22.9 m | 6.1 px |
+
+**Measured (Phase 2), against the real elevation model:** the differential
+displacement between the two extreme bands grows at **0.01524 m per metre of
+elevation**, against **0.0152 predicted** once the curvature magnification above is
+included. The short-baseline stereo pair is real, and it behaves exactly as the
+geometry says it should.
 
 So the DEM is what holds the bands together over relief. Skipping it would leave
 a **terrain-correlated, several-pixel band misregistration** that no global shift
@@ -910,7 +926,7 @@ between them.
 |---|---|---|
 | **0** | This spec + the convention harness (§4) | Frame, quaternion and scan conventions resolved and pinned by a test |
 | **1** ✅ | Frames, timing, ephemeris, camera; sensor model on the **ellipsoid** | ~~Computed footprint matches the STAC geometry within a few km~~ → **208 m**. Band coherence 18 m (4.8 px); model band offsets agree with the imagery to 3.1 px along-track, 5.8 px across. Six of eight conventions resolved |
-| **2** | DEM + geoid + iterative terrain intersection | Intersection converges; heights validated against the geoid |
+| **2** ✅ | DEM + geoid + iterative terrain intersection | ~~Intersection converges~~ → **100%**, within 2 iterations. Geoid undulation −32.3 to −24.6 m, with a guard against PROJ's silent zero. Stereo coefficient 0.01524 measured vs 0.0152 predicted. The DEM improves model-vs-imagery band agreement by **2.5 px over mountains** and **0.0 px over water** — acting only where terrain exists, which is the signature of a correct correction |
 | **3** | Geolocation grid + warp → **first L1C products** (model-only) | Eight bands on one grid, and the band residual has **fallen below the 1–7 px it starts at** (§2.4). This is the test that the model is real: if the residual does not shrink, stop — the model is wrong, and no amount of refinement will save it |
 | **4** | Relative refinement — self-calibrated per-band LoS (§8.2) | Band-to-band residual < 0.3 px, uncorrelated with terrain height |
 | **5** | Absolute refinement vs reference orthoimage (§8.1) | Absolute root-mean-square error reported against held-out check points |

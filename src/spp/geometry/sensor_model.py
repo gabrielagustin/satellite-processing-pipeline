@@ -39,6 +39,7 @@ from spp.geometry.frames import (
     quat_to_matrix,
     ray_ellipsoid_intersection,
 )
+from spp.geometry.terrain import TerrainModel
 from spp.geometry.timing import LineTiming
 
 ColumnAxis = Literal["x", "y"]
@@ -153,6 +154,7 @@ class SensorModel:
         columns: np.ndarray,
         *,
         height: np.ndarray | float = 0.0,
+        terrain: TerrainModel | None = None,
     ) -> np.ndarray:
         """Ground point observed by each detector sample.
 
@@ -165,9 +167,13 @@ class SensorModel:
             ``(m,)``. Zero-based; may be fractional.
         height:
             Height above the WGS84 ellipsoid of the surface to intersect, in
-            metres. Scalar, or shape ``(m,)``. Terrain-aware location iterates
-            this (see ``docs/l1c_spec.md``); with the default of zero this is
-            georeferencing on the ellipsoid.
+            metres. Scalar, or shape ``(m,)``. Ignored when ``terrain`` is given.
+        terrain:
+            Surface to intersect. With a terrain model this is
+            **orthorectification**: the ray is iterated against the elevation
+            model until the ground point stops moving. Without one it is
+            **georeferencing** on a surface of constant height — exact over
+            water, and displacing everything else by the relief.
 
         Returns
         -------
@@ -176,7 +182,10 @@ class SensorModel:
             height_m)``. Samples whose ray misses the surface yield ``NaN``.
         """
         origins, directions = self.rays_ecef(band, lines, columns)
-        ground = ray_ellipsoid_intersection(origins, directions, height=height)
+        if terrain is None:
+            ground = ray_ellipsoid_intersection(origins, directions, height=height)
+        else:
+            ground, _ = terrain.intersect(origins, directions)
         return ecef_to_geodetic(ground)
 
     def rays_ecef(
