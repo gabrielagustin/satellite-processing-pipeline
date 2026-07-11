@@ -225,3 +225,57 @@ optional" framing. Judged worth it: the quicklook is part of how the product
 demonstrates correctness, the cost is one well-established package, and the
 default stays overridable (`--no-quicklook`). The quicklook still skips
 gracefully (with a warning) when the R/G/B bands are absent.
+
+---
+
+## 14. Resolve the telemetry's undocumented conventions by measurement, not by reading
+
+**Context.** The acquisition package delivers platform position, velocity and
+attitude tagged with numeric frame identifiers it never defines, and a
+detector-to-body matrix that does not say which way round the detector's two axes
+feed into it. **Eight** properties of the telemetry are therefore ambiguous:
+the ephemeris frame, the attitude frame, the quaternion's component order and
+rotation direction, the scan direction, and the detector column axis and the sign
+of each detector axis.
+
+**Alternatives.** Read the conventions off the vendor documentation and hard-code
+them. Rejected: the documentation does not state them, and an assumption made in
+their place is invisible in the code and catastrophic in the product. Our own
+first reading assumed the ephemeris was Earth-fixed and put the sub-satellite
+point **5,000 km** from the delivered footprint — a wrong answer that no amount of
+downstream care would have recovered from, and one that looked entirely plausible
+until it was measured.
+
+**Choice.** Make every ambiguous convention an explicit parameter
+(`geometry.Convention`), enumerate all 384 combinations, and **measure** which one
+the data supports, using two probes that answer different questions:
+
+- **Footprint match** against the delivered catalogue geometry. Resolves the
+  frames: a wrong frame throws the footprint 700 km or more.
+- **Band coherence** — locate the same raster sample through two bands on widely
+  separated detector rows and measure how far apart they land. This is the sharp
+  probe, because an absolute bias displaces both bands identically and **cancels**.
+
+The two are deliberately **not** combined into one score. Without a GNSS lock even
+the correct model misses the delivered footprint by ~30 km (see
+[`l1c_spec.md`](l1c_spec.md) §3.2), so summing them would let that irreducible
+bias swamp the hundreds-of-metres signal that separates the fine conventions. The
+footprint rejects gross failures; coherence ranks the survivors. Coherence fell
+from 8,449 m under the initial reading to **123 m** under the resolved one.
+
+**Resolved:** ephemeris frame = **inertial** (not Earth-fixed); attitude frame =
+**LVLH**; quaternion = **scalar-first**; detector column axis = **y**; detector row
+sign = **negative**.
+
+**Trade-offs.** Three conventions remain **unresolved**, and the harness reports
+them as such rather than picking the least-bad. Scan direction and detector column
+sign are *parities* — they mirror the strip north–south and east–west, mapping the
+footprint's corners onto each other and displacing both bands equally, so both
+probes are blind to them by construction. Quaternion direction is preferred 5:1 by
+coherence, short of the 10× margin required. All three need **image content** — the
+reference-image matching of `l1c_spec.md` §8.1 — and until then they are carried as
+declared assumptions, flagged in the quality report.
+
+Reporting an unresolved axis as resolved would be manufacturing a result, and
+would be worse than the honest gap: a product that is silently mirrored is harder
+to catch than one that says it might be.

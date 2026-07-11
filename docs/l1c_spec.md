@@ -51,15 +51,15 @@ earlier sketch.
 
 | Input | Content | Verified state |
 |---|---|---|
-| Per-line timing | `ExposureTimestamp` per raster line | **All 30 948 lines present**, tick = 1 µs, uniform step of exactly 517.0 ticks — no dropped lines |
+| Per-line timing | `ExposureTimestamp` per raster line, **held separately for every band** | **All 30 948 lines present in all 8 bands**, tick = 1 µs, uniform step of exactly 517.0 ticks — no dropped lines. The per-band time origins differ, and that difference is load-bearing — see §2.4 |
 | Time anchor | `TimeSync` pairs (imager clock ↔ platform clock) | Present; maps imager ticks to Unix time |
 | Clock correction | `time_sync_offset` = −6.357 ms | Present in the STAC item |
-| Ephemeris | Position + velocity, Earth-Centred Earth-Fixed (ECEF) | 229 + 229 samples @ ~4.1 Hz, none interpolated |
+| Ephemeris | Position + velocity, frame **not documented** | 229 + 229 samples @ ~4.1 Hz, none interpolated. Measured to be **inertial, not Earth-fixed** — see §4.1 |
 | Attitude | Quaternion + angular rates | 223 + 223 samples @ ~4.3 Hz, none interpolated |
 | Telemetry coverage | vs the 16.00 s image window | **Brackets it** with 16–20 s of margin on both sides |
 | Camera intrinsics | focal length 580 mm, pixel pitch 5.5 µm, principal point (2048, 1536), detector 4096 × 3072, detector→body reference frame | Present |
 | Geometric calibration | boresight alignment (3×3), per-band line-of-sight (LoS) coefficients | **Placeholder — see §3.3** |
-| Band detector rows | Per-band detector start row, 628 … 2132 | Present; this is what separates the bands |
+| Band detector rows | Per-band detector start row, 628 … 2132 | Present; this is what separates the bands in view angle |
 | GNSS lock | `gnss_lock` | **false** — see §3.2 |
 | Footprint | STAC `bbox` / `geometry` | Present; used as an independent check |
 
@@ -75,6 +75,10 @@ Consequence: **use the per-line timestamps, not a nominal line period.** They ar
 complete, so the usual pushbroom hazard — dropped lines silently compressing the
 along-track scale — does not arise here, but the code must still detect it
 (§11, `telemetry_gap`).
+
+And **read them per band.** Each band carries its own timestamp series; they are
+not interchangeable, and treating any one of them as "the" line timing would
+reintroduce the very offset the product has already removed (§2.4).
 
 ### 2.3 The ephemeris is trustworthy in *shape*, and it is not the nominal orbit
 
@@ -104,7 +108,8 @@ model built on this ephemeris should land close, and the footprint becomes a
 usable end-to-end check (§12). It says nothing about *absolute* accuracy — see
 §3.2.
 
-### 2.4 The bands are separated in time and in view angle
+### 2.4 The bands are separated in acquisition — and the L0 product has already
+### compensated for it
 
 Each band is read from a different detector row, so each looks along a different
 along-track angle and images a given ground point at a different instant. From
@@ -121,13 +126,55 @@ the delivered start rows and intrinsics:
 | G | 1916 | +0.207° | +1.43 km | +0.20 s | +384 |
 | B | 2132 | +0.324° | +2.25 km | +0.31 s | +602 |
 
-The extremes (RE3 and B) are **5.7 km and 0.78 s apart** on the ground. This is
-the entire band-co-registration problem, and it is why co-registration is a
-*geometric* operation and not an image-alignment afterthought: a naive
-cross-correlation would have to search ~1500 lines.
+The extremes (RE3 and B) are **5.7 km and 0.78 s apart** at acquisition. **They
+are not 5.7 km apart in the delivered raster**, and the difference between those
+two statements is the whole of what follows.
 
-It also drives the DEM requirement, in a way that is easy to get backwards —
-see §3.4.
+**The compensation is already applied, in the timestamps.** Each band's per-line
+timestamps are offset from its neighbours' by exactly `Δrow × line_period`
+(RE3 versus B: 1504 rows → 777 568 µs, to the microsecond). The product assembler
+staggered the bands when it sliced them out of the detector stream. That stagger
+cancels the view-angle offset because the instrument is designed so that one line
+period advances the ground track by one detector row's worth of ground: the time
+term `v · Δrow · T` and the geometry term `h · Δrow · p / f` are the same quantity,
+with opposite signs.
+
+**Verified on the delivered imagery,** by cross-correlating each L1B band against
+PAN over 1536 × 768 windows at four positions along the strip:
+
+| Band | Along-track residual (px) | Cross-track residual (px) | Naive prediction if *uncompensated* |
+|---|---:|---:|---:|
+| B | −3.4 … −1.6 | +2.4 … +5.8 | +600 lines |
+| G | −1.6 … −0.8 | +1.8 … +4.7 | +384 |
+| R | −1.0 … −0.0 | −1.8 … +2.2 | +192 |
+| NIR | +1.0 … +1.3 | −5.7 … +0.2 | −220 |
+| RE1 | +0.8 … +2.1 | −4.5 … −2.3 | −420 |
+| RE2 | +0.8 … +2.6 | −9.4 … −3.3 | −668 |
+| RE3 | +1.1 … +4.0 | −7.7 … −5.7 | −904 |
+
+Residuals of a few pixels, not hundreds. The bands arrive **approximately
+co-registered**.
+
+**What is left is systematic, and it is exactly what a rigorous model fixes.**
+
+- The along-track residual is proportional to the detector-row offset, with a
+  slope of ≈ **−0.005 px per row**, and it is nearly constant along the strip.
+  That is a **~0.5 % scale error in the stagger**: the assembler used an integer
+  number of lines, which silently assumes the *nominal* altitude-to-ground-speed
+  ratio. The true ratio differs by half a percent (§2.3 — this acquisition is not
+  on the nominal orbit), and half a percent of a 900-row offset is ~4 px.
+- The cross-track residual **varies along the strip** (spread of 2–6 px between
+  windows). A constant misalignment cannot do that. It is the platform **yaw**
+  coupling the bands' along-track separation into cross-track displacement, plus
+  terrain parallax (§3.4) — both of which vary with time and place.
+
+A rigorous sensor model removes all three for free, because it never makes the
+assumption that failed: it uses the *measured* ephemeris and attitude at each
+band's *own* line times, instead of an integer stagger derived from a design
+figure. The residual is not corrected — it never arises.
+
+This is also why the level cannot be shortcut with a per-band constant shift:
+half the error is not constant.
 
 ---
 
@@ -149,11 +196,16 @@ defined in the package. The measured behaviour settles it:
 
 **Conclusion: `frame 1` is a local orbital (LVLH — Local Vertical, Local
 Horizontal) frame, and the quaternion is the small body-pointing offset from
-nadir.** The model must therefore *construct* the LVLH frame from the ECEF
+nadir.** The model must therefore *construct* the LVLH frame from the platform's
 position and velocity, and compose the quaternion onto it.
 
-This is a hypothesis backed by two independent numerical arguments, not a
-certainty. It is resolved for good by the disambiguation harness in §4.
+**Confirmed** by the harness (§4): every alternative reading throws the footprint
+700 km or more.
+
+The same reasoning does *not* apply to the ephemeris, and assuming it did was this
+document's largest error — see §4.1. The frame tags on the position and on the
+attitude are different numbers and mean different things: the attitude is orbital,
+the ephemeris is inertial.
 
 ### 3.2 There is no GNSS lock
 
@@ -218,35 +270,94 @@ a **terrain-correlated, several-pixel band misregistration** that no global shif
 can remove — and which would be invisible over water and glaring over hills.
 This is the argument for orthorectifying rather than merely georeferencing.
 
+The measurement in §2.4 is consistent with this: the band residuals do not sit
+still along the strip — they wander by 2–6 px between windows. Part of that
+wander is yaw, and part of it is precisely this terrain parallax. Neither is
+removable by a constant per-band shift, which is why the correction has to happen
+in the geometry rather than in the image. The stratified test in §12 separates
+the two: after a correct terrain correction, the residual must show **no**
+correlation with elevation.
+
 ---
 
-## 4. Resolving the undocumented conventions
+## 4. Resolving the undocumented conventions — *implemented (Phase 0)*
 
-Four conventions in the input are ambiguous. Guessing wrong is not subtle — the
-footprint lands hundreds or thousands of kilometres away — so they are resolved
-empirically, once, by a cheap harness.
+**Eight** properties of the telemetry are ambiguous, not the four this document
+first assumed. They are resolved empirically by a harness
+(`spp.geometry.conventions`), and the results below are measured, not predicted.
 
-| Ambiguity | Candidates |
-|---|---|
-| Attitude reference frame | LVLH (§3.1, expected) · ECI · ECEF |
-| Quaternion direction | body→reference · reference→body |
-| Quaternion component order | scalar-first `(w, q0, q1, q2)` (expected) · scalar-last |
-| Scan direction | raster row 0 = first line acquired · = last |
+| Ambiguity | Candidates | Verdict |
+|---|---|---|
+| **Ephemeris frame** | inertial · Earth-fixed | **inertial** — resolved |
+| Attitude reference frame | LVLH · inertial · Earth-fixed | **LVLH** — resolved |
+| Quaternion component order | scalar-first · scalar-last | **scalar-first** — resolved |
+| Detector column axis | camera *x* · camera *y* | **y** — resolved |
+| Detector row sign | + · − | **−** — resolved |
+| Quaternion direction | body→reference · reference→body | body→reference — *not resolved* |
+| Scan direction | row 0 = first line · = last | +1 assumed — *not resolved* |
+| Detector column sign | + · − | + assumed — *not resolved* |
 
-**Harness.** Forward-project only the **four image corners** under each
-combination (a few dozen rays in total, milliseconds), and score each by the
-distance between the computed footprint and the delivered STAC footprint. The
-correct combination matches to within the model's error (kilometres at worst);
-every incorrect one is off by tens to thousands of kilometres. The margin is
-enormous, so the test is decisive rather than a fit.
+### 4.1 The ephemeris is not Earth-fixed
 
-The scan-direction test is the sharpest: reversing the line order flips the
-footprint north↔south, a ~116 km error.
+The largest single error in the level, and it was an assumption this document
+originally made and got wrong. The position and velocity are tagged with a frame
+identifier the package never defines; read as Earth-fixed, the sub-satellite point
+lands at longitude 5.4° while the delivered footprint sits at 56.1° — **a 5,000 km
+error**. Two independent measurements settle it:
 
-**Deliverable.** `tests/test_frame_conventions.py` pins the resolved combination,
-and the resolution is recorded in [`decision_log.md`](decision_log.md). If a
-future acquisition contradicts it, the test fails loudly rather than producing a
-plausible, wrong product.
+- Rotating the ephemeris by the Earth-rotation angle puts the sub-satellite point
+  at 55.8°, within tens of kilometres of the footprint centroid.
+- The delivered speed is **7,673.0 m/s**; the circular *inertial* orbital speed at
+  that radius is **7,672.1 m/s**. They agree to 0.01 %. An Earth-fixed speed would
+  differ by ~440 m/s.
+
+### 4.2 Two probes, because neither alone is enough
+
+**Footprint match** — project the four image corners and compare against the
+delivered footprint. This resolves the frames, because a wrong frame throws the
+footprint 700 km or more.
+
+But it cannot resolve anything finer, and the reason matters: **without a GNSS
+lock, even the correct model misses the delivered footprint by ~30 km** (§3.2).
+That irreducible bias would swamp any hundreds-of-metres signal. A single score
+combining the two probes would let the blunt instrument overrule the sharp one.
+
+**Band coherence** — locate the *same* raster sample through two bands with widely
+separated detector rows, and measure how far apart they land. This is the sharp
+probe, and it is sharp precisely because **an absolute bias cancels**: it displaces
+both bands identically. It measures the model's internal consistency, blind to the
+very error the footprint cannot see past.
+
+So the footprint rejects gross failures and coherence ranks the survivors.
+Coherence fell from **8,449 m** under the initial (wrong) reading to **123 m** under
+the resolved one — a signal the footprint probe alone could never have seen.
+
+### 4.3 What the geometry cannot see, and why that is not a failure
+
+Three conventions are **parities**, and no amount of geometry recovers them:
+
+- **Scan direction** mirrors the strip north–south. It maps the footprint's four
+  corners onto each other, so the footprint is *identical*. It displaces both bands
+  equally, so coherence is *identical*. It is invisible.
+- **Detector column sign** mirrors the swath east–west. Same argument.
+- **Quaternion direction** flips the sign of the ~3° yaw. Coherence prefers
+  body→reference by 5× (123 m against 631 m) — a real signal, but below the 10×
+  margin required to call it resolved.
+
+These need **image content**, not geometry: matching against a reference orthoimage
+(§8.1) is the test that settles them, and it is deferred to that phase. Until then
+the values above are recorded as **assumptions, flagged as such** in the quality
+report. A harness that reported them as "resolved" would be manufacturing a result.
+
+### 4.4 Deliverable
+
+`tests/test_geometry_conventions.py` builds a **synthetic** acquisition with a
+known convention — circular orbit, yaw-steered platform, bands staggered exactly
+as a real product staggers them — and asserts that the harness recovers the five
+resolvable axes and **admits** it cannot see the three parities. The synthetic is
+what makes this a test of the harness rather than of the scene.
+
+The resolution is recorded in [`decision_log.md`](decision_log.md).
 
 ---
 
@@ -314,9 +425,14 @@ principal point `(c₀, r₀)`:
 3. **Camera → body.** Apply the detector→body reference-frame matrix from the
    intrinsics, then the boresight alignment matrix.
 
-4. **Body → LVLH → ECEF.** Apply the interpolated attitude quaternion (body
-   offset from nadir), then the LVLH→ECEF rotation built from the interpolated
-   ECEF position and velocity:
+4. **Body → LVLH → inertial → ECEF.** Apply the interpolated attitude quaternion
+   (the body's offset from nadir), then the LVLH→parent rotation built from the
+   interpolated position and velocity, then the Earth-rotation angle.
+
+   The orbital frame must be built from the state **in its own frame**: an LVLH
+   triad derived from an inertial velocity and one derived from an Earth-fixed
+   velocity are genuinely different frames, differing by the Earth-rotation term.
+   The triad is:
 
    ```
    ẑ = −normalize(r)                     (nadir)
@@ -327,7 +443,15 @@ principal point `(c₀, r₀)`:
    The exact axis convention is one of the items pinned by §4.
 
 The result is a unit ray direction in ECEF, originating at the interpolated
-platform position.
+platform position (itself rotated into ECEF).
+
+**Yaw steering.** The ~3° yaw in the delivered attitude is not noise, and it is not
+optional to model. The ground track is not the inertial track — the surface slides
+eastward beneath the orbit at up to 465 m/s — so a pushbroom whose detector rows
+are not aligned with the *ground* track smears its band stagger sideways. Real
+platforms yaw to compensate, and that yaw is what makes the per-band stagger cancel
+(§2.4). A model that ignores it does not merely lose accuracy; it fails to
+co-register the bands at all.
 
 ### 5.4 Ground intersection
 
@@ -422,10 +546,11 @@ and report it (`interp.max_error_px`).
   Configurable via `--gsd`; the native value is derived from the ephemeris and
   reported, never assumed.
 - **Extent** — the **union** of all eight band footprints, snapped to GSD
-  multiples. Because the bands are offset by up to 5.7 km along-track (§2.4), the
-  strip ends have partial band coverage. The union preserves all data; the
-  all-band intersection is computed and reported so a consumer can crop to fully
-  co-registered coverage.
+  multiples. The bands' footprints very nearly coincide (the product's stagger
+  already aligns them — §2.4), so the union is barely larger than any one band;
+  the differences are the few-pixel residuals and the edge effects of the stagger
+  itself. The union preserves all data; the all-band intersection is computed and
+  reported so a consumer can crop to fully co-registered coverage.
 
 All bands warp to this **one** grid. That is what co-registers them.
 
@@ -490,10 +615,25 @@ so is worth more than a confident one that is wrong.
 
 ### 8.2 Band co-registration, and self-calibrating the missing LoS
 
-After physical orthorectification the bands should already be aligned — the
-per-band view angle and the DEM have removed both the 5.7 km offset and the
-terrain parallax. What remains is the residual error of the interior orientation:
-exactly the per-band LoS calibration the file ships as identity (§3.3).
+The bands arrive a few pixels apart, not kilometres (§2.4), and the physical model
+should close most of that gap on its own: it replaces the product's integer-line
+stagger — whose ~0.5 % scale error is the bulk of the along-track residual — with
+the real ephemeris, and it removes the yaw coupling and the terrain parallax that
+make the cross-track residual wander along the strip.
+
+What should survive is the part the model cannot know: the **interior
+orientation**. The true per-band view angles are not exactly the ones implied by
+the nominal detector rows — optical distortion, detector alignment and the
+boresight all perturb them. That perturbation is precisely the per-band LoS
+calibration the file ships as an unpopulated identity (§3.3), and it is what the
+post-ortho residual measures.
+
+So the measurement plays two roles, and they must not be confused: **before** the
+model it is a check that the model is working (the residual should collapse from
+several pixels toward zero); **after** it is an estimate of the missing
+calibration. If the post-ortho residual does *not* shrink, the fault is in the
+model, not in the calibration, and feeding the residual back would merely paper
+over a bug. The exit criterion in §14 is written to catch exactly that.
 
 1. Phase-correlate each band against a reference band (**PAN** — broadest
    spectral coverage, best signal-to-noise ratio) over textured windows.
@@ -533,6 +673,9 @@ GSD 3.77 m):
 | DEM height error → absolute position | 10 m | 0.19 m | 0.05 px |
 | DEM height → *band-to-band* (h = 500 m) | — | 7.1 m | **1.9 px** |
 | Geolocation-grid interpolation (8 px nodes) | — | <0.4 m | <0.1 px |
+| **Band-to-band, as delivered** (measured, §2.4) | — | 4–26 m | **1–7 px** |
+| ↳ of which: integer-stagger scale error | ~0.5 % of Δrow | up to 15 m | up to 4 px |
+| ↳ of which: yaw coupling + terrain parallax | varies along strip | 8–23 m | 2–6 px |
 
 **What this table says.** Attitude and position dominate by two orders of
 magnitude over everything the model itself controls. Perfecting the interpolation,
@@ -704,7 +847,7 @@ between them.
 | **0** | This spec + the convention harness (§4) | Frame, quaternion and scan conventions resolved and pinned by a test |
 | **1** | Frames, timing, ephemeris, camera; sensor model on the **ellipsoid** | Computed footprint matches the STAC geometry within a few km |
 | **2** | DEM + geoid + iterative terrain intersection | Intersection converges; heights validated against the geoid |
-| **3** | Geolocation grid + warp → **first L1C products** (model-only) | Eight bands on one grid; band residuals *measured* |
+| **3** | Geolocation grid + warp → **first L1C products** (model-only) | Eight bands on one grid, and the band residual has **fallen below the 1–7 px it starts at** (§2.4). This is the test that the model is real: if the residual does not shrink, stop — the model is wrong, and no amount of refinement will save it |
 | **4** | Relative refinement — self-calibrated per-band LoS (§8.2) | Band-to-band residual < 0.3 px, uncorrelated with terrain height |
 | **5** | Absolute refinement vs reference orthoimage (§8.1) | Absolute root-mean-square error reported against held-out check points |
 | **6** | Geometric QA report, STAC item, quicklook, tests, docs | QA schema complete; `spp-l1c` documented end-to-end |
