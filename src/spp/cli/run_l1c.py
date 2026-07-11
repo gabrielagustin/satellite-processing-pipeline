@@ -60,6 +60,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip the self-calibration of the missing line-of-sight term. The bands "
         "will not be co-registered.",
     )
+    parser.add_argument(
+        "--no-scene-correction",
+        action="store_true",
+        help="Skip the scene-local (attitude) correction. The instrument calibration is "
+        "still estimated, but the bands will not fully co-register.",
+    )
+    parser.add_argument(
+        "--no-stack",
+        action="store_true",
+        help="Do not write the multi-band stack.tif (per-band rasters only).",
+    )
     parser.add_argument("--step", type=int, default=8, help="Geolocation-lattice spacing, px")
     parser.add_argument("--quiet", action="store_true")
     return parser.parse_args(argv)
@@ -158,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         terrain=terrain,
         reference_band=args.reference_band,
         refine=not args.no_refine,
+        scene_correct=not args.no_scene_correction,
+        stack=not args.no_stack,
         gsd_m=args.gsd,
         step=args.step,
     )
@@ -173,8 +186,12 @@ def _summarise(result) -> None:
     grid = result.grid
 
     print()
-    print(f"  L1C: {len(result.products)} band(s) on {grid.crs.to_string()} "
-          f"@ {grid.gsd_m} m  ({grid.width} x {grid.height} px)")
+    if result.stack:
+        print(f"  L1C: stack.tif — {len(result.products)} band(s), co-registered, "
+              f"{grid.crs.to_string()} @ {grid.gsd_m} m  ({grid.width} x {grid.height} px)")
+    else:
+        print(f"  L1C: {len(result.products)} band(s) on {grid.crs.to_string()} "
+              f"@ {grid.gsd_m} m  ({grid.width} x {grid.height} px)")
     print(f"       native sampling {qa['grid']['native_gsd_m']} m, "
           f"lattice error {qa['interpolation']['max_error_px']} px")
     print(f"       terrain: {qa['terrain']['source']}")
@@ -193,6 +210,17 @@ def _summarise(result) -> None:
                 )
         for band, value in refused.items():
             print(f"       {band:5s} REFUSED — {value['reason']}")
+
+    scene_correction = qa.get("scene_correction", {})
+    fitted_scene = [b for b, v in scene_correction.items() if isinstance(v, dict) and v.get("fitted")]
+    if fitted_scene:
+        print()
+        print("  scene correction (THIS acquisition's pointing, not the instrument —")
+        print("  applied to the product, never written to the calibration):")
+        for band in fitted_scene:
+            value = scene_correction[band]
+            print(f"       {band:5s} band-to-band RMS {value['rms_before_px']:6.2f} -> "
+                  f"{value['rms_after_px']:.2f} px")
 
     if qa["flags"]:
         print()

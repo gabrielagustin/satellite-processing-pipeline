@@ -140,14 +140,32 @@ and the position-dependence grows with each band's **time separation** from the 
 apart, the attitude jitters by ~0.005° about a smooth fit (about 9 px on the ground), and
 that jitter does not cancel across half a second.
 
-**A ~2 px floor remains even where the fit succeeds.** Window-to-window scatter of
-1.4–2.7 px survives the correction, and no constant offset touches it. The product is
-therefore **closer to co-registered than L1B, but not co-registered**.
+**The attitude part is corrected in the product, not in the calibration.** The
+along-track-varying residual is fitted as a low-degree polynomial and applied to the
+band's geolocation grid (`spp.refine.scene`). It is recorded as a **scene** property and
+is never written back to the instrument model — doing so would produce a per-band
+"optical" constant that is really a snapshot of one pass's pointing noise, wrong for
+every other acquisition while looking, on this one, like a triumph. Keeping the two
+corrections in separate places is the only thing that distinguishes a co-registered image
+from a corrupted instrument model.
 
-**Next step.** The remaining error needs attitude smoothing or estimation, not a
-line-of-sight coefficient. Fitting it into the calibration would produce a per-band
-"optical" correction that is really a snapshot of this scene's pointing noise — wrong for
-every other acquisition of the same instrument.
+**Measured in the delivered `stack.tif`** (bands against PAN, 4.0 m pixels):
+
+| Band | Median | 90th percentile |
+|---|---:|---:|
+| G | 1.87 px | 3.15 px |
+| R | 2.28 px | 3.42 px |
+| B | 2.80 px | 4.72 px |
+
+Against ~8 px in the delivered L1B, and ~8.3 px in L1C without any calibration. So the
+bands **are co-registered to 2–3 px, and are not co-registered to the sub-pixel target**.
+The floor is attitude jitter (~0.005° root-mean-square about a smooth fit, about 9 px on
+the ground) plus matching scatter, and neither a constant offset nor a smooth polynomial
+removes it.
+
+**Next step for the last few pixels.** Estimate the attitude itself — a filtered or
+smoothed attitude, or a per-line correction driven by dense matching — rather than
+absorbing its effect into a per-band displacement field.
 
 ### Absolute accuracy is unvalidated
 

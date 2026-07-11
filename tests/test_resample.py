@@ -231,3 +231,31 @@ def test_dem_tiles_handle_the_southern_and_western_hemispheres():
     urls = tile_urls((-58.6, -34.9, -58.2, -34.4))
     assert len(urls) == 1
     assert "S35_00_W059" in urls[0]
+
+
+# -- the multi-band stack ---------------------------------------------------
+
+
+def test_the_stack_carries_every_band(tmp_path):
+    """Written by window with all bands together, every band survives."""
+    from spp.pipeline.l1c_pipeline import L1CPipeline
+
+    products = {}
+    for name, value in (("PAN", 1.0), ("R", 2.0), ("G", 3.0)):
+        path = tmp_path / f"{name}.tif"
+        _write_source(path, np.full((1024, 512), value, dtype=np.float32))
+        products[name] = path
+
+    target = TargetGrid.covering({"PAN": (56.0, 26.5, 56.1, 26.7)}, native_gsd_m=8.0)
+    target = TargetGrid(
+        crs=target.crs, transform=target.transform, width=512, height=1024,
+        gsd_m=target.gsd_m, native_gsd_m=target.native_gsd_m,
+    )
+
+    stack = L1CPipeline._write_stack(None, products, target, tmp_path)
+
+    with rasterio.open(stack) as src:
+        assert src.count == 3
+        assert src.descriptions == ("PAN", "R", "G")
+        for index, expected in enumerate((1.0, 2.0, 3.0), start=1):
+            np.testing.assert_allclose(src.read(index), expected)
