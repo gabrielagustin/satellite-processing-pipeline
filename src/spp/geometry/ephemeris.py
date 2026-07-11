@@ -167,14 +167,27 @@ class Attitude:
     times: np.ndarray = field(repr=False)
     quaternions: np.ndarray = field(repr=False)
     rates: np.ndarray | None = field(default=None, repr=False)
+    rates_are_consistent: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         arrays = (self.quaternions,) if self.rates is None else (self.quaternions, self.rates)
         _validate_history(self.times, arrays, "Attitude")
         object.__setattr__(self, "quaternions", quat_normalize(self.quaternions))
 
-    @property
-    def rates_are_consistent(self) -> bool:
+        # Decided once, here, because it is a property of the *data*, not of any one
+        # call. Evaluating it per-interpolation would recompute the whole quaternion
+        # sequence on every geolocation node -- and would emit the same warning dozens
+        # of times, which is how a warning stops being read.
+        object.__setattr__(self, "rates_are_consistent", self._check_rates())
+        if self.rates is not None and not self.rates_are_consistent:
+            logger.warning(
+                "Attitude: the delivered angular rates are not the derivative of the "
+                "delivered quaternions, so they cannot be used as interpolation slopes; "
+                "falling back to SLERP. Using them would overshoot between samples and "
+                "make the model worse, not better."
+            )
+
+    def _check_rates(self) -> bool:
         """Whether the delivered angular rates are the derivative of the quaternions.
 
         They need not be, and in the reference acquisition they are **not**: the
@@ -192,8 +205,11 @@ class Attitude:
         to 123 m — a model made worse by a "refinement".
 
         So the rates are **checked, not trusted**. When they disagree with the
-        quaternion sequence, interpolation silently falls back to SLERP, which
-        needs no derivative and cannot be misled by a wrong one.
+        quaternion sequence, interpolation falls back to SLERP, which needs no
+        derivative and cannot be misled by a wrong one.
+
+        Evaluated once, at construction; the answer is stored in
+        :attr:`rates_are_consistent`.
         """
         if self.rates is None:
             return False
@@ -253,14 +269,6 @@ class Attitude:
         delta = quat_to_rotvec(quat_multiply(quat_conjugate(q0), q1))
 
         use_rates = rate_aware and self.rates is not None and self.rates_are_consistent
-        if rate_aware and self.rates is not None and not use_rates:
-            logger.warning(
-                "Attitude: the delivered angular rates are not the derivative of "
-                "the delivered quaternions, so they cannot be used as interpolation "
-                "slopes; falling back to SLERP. Using them would overshoot between "
-                "samples and make the model worse, not better."
-            )
-
         if not use_rates:
             rotvec = s[:, None] * delta  # SLERP, expressed in the same algebra
         else:

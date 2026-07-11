@@ -25,7 +25,7 @@ import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 
-from spp.geometry import geoloc_grid
+from spp.geometry import conventions, geoloc_grid
 from spp.geometry.camera import Camera
 from spp.geometry.ephemeris import Attitude, Ephemeris
 from spp.geometry.frames import ecef_to_geodetic, eci_to_ecef_matrix
@@ -45,15 +45,22 @@ RESOLVED_CONVENTION = Convention(
     quaternion_direction="body_to_ref",
     scan_direction=1,
     column_axis="y",
-    column_sign=1,
+    column_sign=-1,
     row_sign=-1,
 )
-"""The telemetry conventions, six resolved by measurement and two assumed.
+"""The telemetry conventions.
 
-The scan direction and the detector column sign are **not** resolved: they mirror the
-strip north-south and east-west, which leaves every geometric probe bit-identical. They
-are carried here as declared assumptions and flagged in the quality report. See
-``docs/l1c/spec.md`` §4.3.
+Six were resolved by geometry (``spp.geometry.conventions.resolve``). The remaining two —
+the scan direction and the detector column sign — are **mirrors**, invisible to every
+geometric probe, and they are resolved against the **terrain**: water is near-black in the
+near infrared, so a correct parity makes bright coincide with high ground and a mirrored
+one anti-correlates (``resolve_parities``).
+
+``column_sign`` was **wrong here until a user overlaid the product on a basemap and saw
+that it did not match.** Every geometric check had passed. That is precisely what the
+harness meant when it reported the parities as unresolved rather than guessing them, and
+it is why the pipeline now resolves them from image content instead of carrying them as
+assumptions.
 """
 
 
@@ -108,6 +115,7 @@ class L1CPipeline:
         convention: Convention = RESOLVED_CONVENTION,
         reference_band: str = "PAN",
         refine: bool = True,
+        resolve_parities: bool = True,
         scene_correct: bool = True,
         stack: bool = True,
         gsd_m: float | None = None,
@@ -121,6 +129,7 @@ class L1CPipeline:
         self.convention = convention
         self.reference_band = reference_band
         self.refine = refine
+        self.resolve_parities = resolve_parities
         self.scene_correct = scene_correct
         self.stack = stack
         self.gsd_m = gsd_m
@@ -142,17 +151,30 @@ class L1CPipeline:
                 "Run the L1B stage first (`spp-l1b`)."
             )
 
+        convention = self.convention
+        parity_report = None
+        if self.resolve_parities and isinstance(self.terrain, DEMTerrain):
+            convention, parity_report = self._resolve_parities(paths, bands)
+            if convention != self.convention:
+                self.convention = convention
+                self.model = SensorModel(
+                    self.camera, self.ephemeris, self.attitude, self.timing,
+                    convention=convention,
+                )
+
         qa: dict = {
             "conventions": {
-                "resolved": self.convention.describe(),
-                "assumed": ["scan_direction", "column_sign"],
+                "resolved": convention.describe(),
+                "parities": parity_report or {"note": "not resolved; assumed"},
             },
             "grid": {},
             "terrain": self._terrain_qa(),
             "coregistration": {},
             "los_correction": {},
-            "flags": ["no_gnss_lock", "absolute_accuracy_unvalidated", "conventions_assumed"],
+            "flags": ["no_gnss_lock", "absolute_accuracy_unvalidated"],
         }
+        if not (parity_report and parity_report.get("decisive")):
+            qa["flags"].append("conventions_assumed")
 
         model = self.model
         matches: dict[str, list] = {}
@@ -229,6 +251,21 @@ class L1CPipeline:
         logger.info("Wrote %d band(s) and qa_report_l1c.json to %s", len(products), output_dir)
 
         return L1CResult(products=products, qa=qa, grid=target, stack=stack_path)
+
+    def _resolve_parities(self, paths: dict[str, Path], bands: list[str]):
+        """Settle the two mirrors that geometry cannot see, against the elevation model.
+
+        Near-infrared is used when available: water is near-black in it, so the
+        land/water contrast that carries the signal is strongest.
+        """
+        band = next((b for b in ("NIR", "RE3", "RE2", "R") if b in bands), bands[0])
+        logger.info("Resolving the scan/column parities against the terrain (%s)...", band)
+        with rasterio.open(paths[band]) as src:
+            image = src.read(1)
+        return conventions.resolve_parities(
+            self.camera, self.ephemeris, self.attitude, self.timing,
+            band=band, image=image, terrain=self.terrain, base=self.convention,
+        )
 
     def _scene_correct(
         self, model: SensorModel, grids: dict, matches: dict, qa: dict

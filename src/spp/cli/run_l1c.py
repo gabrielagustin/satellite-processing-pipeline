@@ -14,7 +14,10 @@ import argparse
 import json
 import logging
 import sys
+import warnings
 from pathlib import Path
+
+from rasterio.errors import NotGeoreferencedWarning
 
 from spp.geometry import dem_source
 from spp.geometry.telemetry import (
@@ -59,6 +62,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip the self-calibration of the missing line-of-sight term. The bands "
         "will not be co-registered.",
+    )
+    parser.add_argument(
+        "--no-parity-check",
+        action="store_true",
+        help="Do not resolve the scan/column mirrors against the terrain; use the "
+        "defaults. Only sensible if the scene has no land/water contrast.",
     )
     parser.add_argument(
         "--no-scene-correction",
@@ -116,6 +125,9 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s  %(message)s",
     )
     logging.getLogger("rasterio").setLevel(logging.ERROR)
+    # L1B rasters are in sensor coordinates and carry no CRS *by design*. GDAL says so
+    # on every open; it is not news, and it drowns the log.
+    warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 
     package = _read_package(args.input)
     ancillary, session = package["ancillary"], package["session"]
@@ -169,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         terrain=terrain,
         reference_band=args.reference_band,
         refine=not args.no_refine,
+        resolve_parities=not args.no_parity_check,
         scene_correct=not args.no_scene_correction,
         stack=not args.no_stack,
         gsd_m=args.gsd,

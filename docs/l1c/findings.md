@@ -1,8 +1,10 @@
 # L1C — What Measurement Overturned
 
 The design of the geometric level is in [`l1c_spec.md`](spec.md). This document
-is about how it got there, and it exists because the honest answer is: **six of its
-load-bearing assumptions were wrong, and measurement found every one of them.**
+is about how it got there, and it exists because the honest answer is: **seven of its
+load-bearing assumptions were wrong.** Measurement found six of them. The seventh was
+found by a user opening the product in a geographic information system and seeing that it
+did not line up.
 
 None of the six announced itself. Each produced a plausible product, a finite
 number, a model that converged. Four of them looked exactly like an *irreducible
@@ -225,16 +227,55 @@ criterion.
 
 ---
 
+## 7. The mirror, found by a human looking at a map
+
+The two parities — the scan direction (a north–south mirror) and the detector column
+sign (an east–west mirror) — were carried as **declared assumptions**. Every geometric
+probe in the harness returns *bit-identical* scores for all four combinations: both map
+the footprint's corners onto each other and displace every band identically. The harness
+reported them as unresolved and refused to guess. That was correct, and it was not enough.
+
+**One of them was wrong.** The product was georeferenced to 208 m, orthorectified,
+band-co-registered, and it passed every check the framework could run — and it did not
+overlay a basemap. A user opened it in a geographic information system, looked at it, and
+said so.
+
+**Found by.** The elevation model, which the pipeline already downloads and which has a
+coastline with real geolocation. Water is near-black in the near infrared; land is not. A
+correct parity makes *bright* coincide with *high*, and a mirrored one **anti-correlates**:
+
+| scan | column sign | agreement with the terrain | Matthews correlation |
+|---:|---:|---:|---:|
+| +1 | **−1** | **92.9 %** | **+0.859** |
+| +1 | +1 | 80.9 % | +0.618 *(what the model was using)* |
+| −1 | +1 | 15.8 % | −0.694 |
+| −1 | −1 | 18.6 % | −0.636 |
+
+**Confirmed independently.** With the mirror corrected, the two bands the
+self-calibration had **refused** — because their residual varied with position — now fit
+cleanly. The mirror had been injecting exactly that position dependence. A wrong parity
+does not merely flip the picture; it corrupts everything measured through it.
+
+**Changed.** `resolve_parities` now settles them against the terrain, automatically and
+offline, and the pipeline runs it by default. The check a user did by eye is now a check
+the pipeline does every time.
+
+**The lesson is the sharpest one here.** Every finding above was caught by a check that
+could fail. This one was caught by a check the framework *could not run at all* — the
+harness knew it was blind, said so, and shipped the blindness as a flagged assumption.
+That was honest, and honest was not sufficient. **An assumption you have declared is
+still an assumption**, and the only reason this one was ever found is that a human looked
+at the picture.
+
+Two things follow. Ship a way to *look* at the product, and read the flags as work
+remaining rather than as absolution.
+
+---
+
 ## Still open
 
 The findings above are settled. These are not, and they are recorded as assumptions
 rather than results:
-
-- **Two parities remain unresolved** — the scan direction (a north–south mirror) and
-  the detector column sign (an east–west mirror). Both map the footprint's corners
-  onto each other *and* displace every band identically, so both probes return
-  bit-identical scores. They are not merely unmeasured; they are **provably invisible
-  to geometry**, and only image content settles them.
 - **Absolute accuracy is unvalidated.** The model reproduces the delivered footprint
   to 208 m — but that footprint was almost certainly derived by the provider from the
   *same* telemetry, so the agreement validates the implementation, not the orbit.

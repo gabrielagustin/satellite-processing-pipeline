@@ -150,6 +150,23 @@ class Camera:
         if self.boresight.shape != (3, 3):
             raise ValueError(f"boresight must be 3x3, got {self.boresight.shape}")
 
+        # Report the unpopulated calibration once, here. It is a property of the
+        # delivered file, not of any particular ray, and warning per-evaluation buries
+        # everything else in the log.
+        unpopulated = sorted(
+            name
+            for name, optics in bands.items()
+            if tuple(optics.los_along) == UNPOPULATED_LOS_SENTINEL
+            or tuple(optics.los_across) == UNPOPULATED_LOS_SENTINEL
+        )
+        if unpopulated:
+            logger.warning(
+                "Line-of-sight calibration is unpopulated for %s (a constant 1 rad "
+                "offset is not a physical correction); using zero. It can be estimated "
+                "from band co-registration.",
+                ", ".join(unpopulated),
+            )
+
     # -- public API ---------------------------------------------------------
 
     def view_angles(self, band: str, columns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -182,8 +199,8 @@ class Camera:
         along = np.full_like(across, np.arctan((optics.effective_row - r0) * p / f))
 
         u = self._normalised_column(cols)
-        across = across + _polyval(_usable_coefficients(optics.los_across, band, "across"), u)
-        along = along + _polyval(_usable_coefficients(optics.los_along, band, "along"), u)
+        across = across + _polyval(_usable_coefficients(optics.los_across), u)
+        along = along + _polyval(_usable_coefficients(optics.los_along), u)
         return across, along
 
     def rays(
@@ -256,8 +273,8 @@ class Camera:
         """
         optics = self._optics(band)
         return (
-            _usable_coefficients(optics.los_along, band, "along"),
-            _usable_coefficients(optics.los_across, band, "across"),
+            _usable_coefficients(optics.los_along),
+            _usable_coefficients(optics.los_across),
         )
 
     def with_boresight(self, boresight: np.ndarray) -> Camera:
@@ -315,17 +332,12 @@ def _polyval(coefficients: tuple[float, ...], u: np.ndarray) -> np.ndarray:
     return np.polyval(tuple(reversed(coefficients)), u)
 
 
-def _usable_coefficients(
-    coefficients: tuple[float, ...], band: str, axis: str
-) -> tuple[float, ...]:
-    """Reject the unpopulated-calibration sentinel, keep anything genuine."""
+def _usable_coefficients(coefficients: tuple[float, ...]) -> tuple[float, ...]:
+    """Reject the unpopulated-calibration sentinel, keep anything genuine.
+
+    Silent: the sentinel is reported once, when the camera is built. Warning here would
+    fire on every ray.
+    """
     if tuple(coefficients) == UNPOPULATED_LOS_SENTINEL:
-        logger.warning(
-            "Band %s: %s line-of-sight calibration is unpopulated (a constant "
-            "1 rad offset is not a physical correction); using zero. The "
-            "correction can be estimated from band co-registration.",
-            band,
-            axis,
-        )
         return ()
     return tuple(coefficients)

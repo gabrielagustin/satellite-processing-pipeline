@@ -34,6 +34,7 @@ that is otherwise wrong.
 from __future__ import annotations
 
 import itertools
+import logging
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
@@ -60,6 +61,8 @@ QUATERNION_DIRECTIONS: tuple[QuaternionDirection, ...] = ("body_to_ref", "ref_to
 SCAN_DIRECTIONS: tuple[int, ...] = (1, -1)
 COLUMN_AXES: tuple[ColumnAxis, ...] = ("x", "y")
 AXIS_SIGNS: tuple[AxisSign, ...] = (1, -1)
+
+logger = logging.getLogger(__name__)
 
 MEAN_EARTH_RADIUS_M = 6371008.8
 """Mean Earth radius, for converting angular separations to ground distance."""
@@ -482,3 +485,146 @@ def _dedupe_closing_vertex(polygon: np.ndarray) -> np.ndarray:
     if len(polygon) > 1 and np.allclose(polygon[0], polygon[-1]):
         return polygon[:-1]
     return polygon
+
+
+# -- the parities, which only image content can settle ----------------------
+
+
+def resolve_parities(
+    camera: Camera,
+    ephemeris: Ephemeris,
+    attitude: Attitude,
+    timing: dict[str, LineTiming],
+    *,
+    band: str,
+    image: np.ndarray,
+    terrain,
+    base: Convention,
+    land_percentile: float = 55.0,
+    land_height_m: float = 2.0,
+    n_samples: int = 20_000,
+    seed: int = 0,
+) -> tuple[Convention, dict]:
+    """Resolve the scan direction and the detector column sign — against the terrain.
+
+    These two are **mirrors**: one flips the strip north–south, the other east–west.
+    Both map the footprint's four corners onto each other and displace every band
+    identically, so every purely geometric probe in this module returns bit-identical
+    scores for all four combinations. :func:`resolved_axes` reports them as unresolved,
+    and it is right to.
+
+    Only **image content** can see them, and it needs a reference with real geolocation.
+    The elevation model is one, and the pipeline has already downloaded it: its coastline
+    is ground truth. Water is near-black in the near infrared and land is not, so a
+    correct parity makes *bright* coincide with *high* — and a mirrored one
+    anti-correlates, which is not a subtle failure.
+
+    This is what a user checking the product against a basemap does by eye, made
+    automatic and offline.
+
+    Parameters
+    ----------
+    camera, ephemeris, attitude, timing:
+        The sensor model's components.
+    band:
+        Band whose imagery is supplied. **Use a near-infrared band** if there is one:
+        the water/land contrast is what carries the signal.
+    image:
+        The band's raster, in sensor coordinates.
+    terrain:
+        Elevation model, with a geoid (see :mod:`spp.geometry.terrain`).
+    base:
+        The conventions already resolved geometrically. Only the two parities are varied.
+    land_percentile:
+        Radiance percentile above which a sample is called land.
+    land_height_m:
+        Orthometric height above which the terrain is called land.
+
+    Returns
+    -------
+    tuple
+        ``(convention, report)`` — the base convention with the parities filled in, and
+        the agreement and Matthews correlation of every candidate.
+    """
+    rng = np.random.default_rng(seed)
+    n_lines, n_columns = image.shape
+    lines = rng.uniform(1, n_lines - 2, n_samples)
+    columns = rng.uniform(1, n_columns - 2, n_samples)
+
+    radiance = image[lines.astype(int), columns.astype(int)].astype(np.float64)
+    finite = np.isfinite(radiance)
+    lines, columns, radiance = lines[finite], columns[finite], radiance[finite]
+    if radiance.size < 100:
+        raise ValueError("Too few valid samples to resolve the parities")
+
+    bright = radiance > np.percentile(radiance, land_percentile)
+
+    report: dict = {}
+    best: tuple[float, Convention] | None = None
+    for scan in SCAN_DIRECTIONS:
+        for column_sign in AXIS_SIGNS:
+            candidate = Convention(
+                ephemeris_frame=base.ephemeris_frame,
+                attitude_frame=base.attitude_frame,
+                quaternion_order=base.quaternion_order,
+                quaternion_direction=base.quaternion_direction,
+                scan_direction=scan,
+                column_axis=base.column_axis,
+                column_sign=column_sign,
+                row_sign=base.row_sign,
+            )
+            model = SensorModel(camera, ephemeris, attitude, timing, convention=candidate)
+            ground = model.locate(band, lines, columns, terrain=terrain)
+
+            orthometric = terrain.height(ground[:, 0], ground[:, 1]) - terrain.geoid(
+                ground[:, 0], ground[:, 1]
+            )
+            high = orthometric > land_height_m
+
+            agreement, mcc = _binary_agreement(bright, high)
+            report[f"scan={scan:+d},column_sign={column_sign:+d}"] = {
+                "agreement": round(float(agreement), 4),
+                "matthews_correlation": round(float(mcc), 4),
+            }
+            if best is None or mcc > best[0]:
+                best = (mcc, candidate)
+
+    assert best is not None
+    mcc, winner = best
+    report["winner"] = winner.describe()
+    report["matthews_correlation"] = round(float(mcc), 4)
+    report["decisive"] = bool(mcc > 0.5)
+
+    if mcc <= 0.5:
+        logger.warning(
+            "Parity resolution is weak (Matthews correlation %.2f). The scene may lack "
+            "the land/water contrast this test needs. The parities remain assumptions.",
+            mcc,
+        )
+    else:
+        logger.info(
+            "Parities resolved against the terrain: scan_direction=%+d, column_sign=%+d "
+            "(Matthews correlation %.2f)",
+            winner.scan_direction,
+            winner.column_sign,
+            mcc,
+        )
+    return winner, report
+
+
+def _binary_agreement(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+    """Agreement and Matthews correlation between two binary classifications.
+
+    The Matthews correlation, not the plain agreement: it is symmetric under class
+    imbalance, and a mirrored image does not merely score *lower*, it scores *negative* —
+    which is a far stronger statement than "less good".
+    """
+    tp = float(np.sum(a & b))
+    tn = float(np.sum(~a & ~b))
+    fp = float(np.sum(a & ~b))
+    fn = float(np.sum(~a & b))
+
+    agreement = (tp + tn) / a.size
+    denominator = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = (tp * tn - fp * fn) / denominator if denominator > 0 else 0.0
+    return agreement, mcc
