@@ -21,14 +21,14 @@ processing engine.
 |------|--------|--------|
 | L0 / L1A | Per-band DN rasters (sensor coords) | Ingested |
 | **L1B** | **TOA spectral radiance** | **Implemented** |
-| L1C | Georeferenced / orthorectified radiance | **Partly implemented** — georeferencing and orthorectification work; band co-registration does not yet. See [`docs/l1c_spec.md`](docs/l1c_spec.md) and [`docs/limitations.md`](docs/limitations.md) |
+| L1C | Georeferenced / orthorectified radiance | **Partly implemented** — georeferencing and orthorectification work; band co-registration does not yet. See [`docs/l1c_spec.md`](docs/l1c/spec.md) and [`docs/limitations.md`](docs/l1b/limitations.md) |
 | L2A | Surface reflectance | Specified |
 
 See [`docs/product_hierarchy.md`](docs/product_hierarchy.md) for the full
 hierarchy and [`docs/remaining_levels.md`](docs/remaining_levels.md) for the
 levels not yet implemented. L1C — georeferencing, orthorectification and band
 co-registration — has a detailed implementable design in
-[`docs/l1c_spec.md`](docs/l1c_spec.md).
+[`docs/l1c_spec.md`](docs/l1c/spec.md).
 
 ---
 
@@ -86,7 +86,7 @@ An acquisition package directory containing:
 - `calibration/` with the Calibration Parameter File, spectral filters and the
   solar reference.
 
-See [`docs/input_package.md`](docs/input_package.md) for the layout. Band files
+See [`docs/input_package.md`](docs/l1b/input_package.md) for the layout. Band files
 and calibration assets are **discovered** (via the STAC assets and glob
 patterns), so exact file names are not hard-coded.
 
@@ -185,7 +185,7 @@ Written to the output directory:
 
 A full 8-band run takes roughly **10 minutes** and needs **~2 GB of RAM**, producing a
 ~3.5 GB stack. Four bands take about 4 minutes. The warp is **not** memory-bounded (unlike
-L1B) — see [`docs/performance.md`](docs/performance.md).
+L1B) — see [`docs/performance.md`](docs/l1b/performance.md).
 
 ### L1C — read the closing summary
 
@@ -198,7 +198,7 @@ self-calibration refused.
 The rasters open in any geographic information system and overlay a basemap plausibly
 whether or not any of that is true, which is exactly why the run says it out loud. Band
 co-registration currently reaches **2–3 px**, not the sub-pixel target; the floor is
-attitude jitter. See [`docs/limitations.md`](docs/limitations.md).
+attitude jitter. See [`docs/limitations.md`](docs/l1b/limitations.md).
 
 ---
 
@@ -241,21 +241,25 @@ satellite-processing-pipeline/
 
 ## Documentation
 
-| Document | Contents |
+Organised by processing level, with the cross-cutting documents at the root.
+
+| | |
 |---|---|
-| [architecture.md](docs/architecture.md) | Component design and data flow |
+| **[docs/l1b/](docs/l1b/)** | **L1B — radiometric calibration.** Architecture, input package, validation, QA schema, performance, limitations |
+| **[docs/l1c/](docs/l1c/)** | **L1C — geometric processing.** [Spec](docs/l1c/spec.md), [findings](docs/l1c/findings.md), architecture, validation, QA schema, performance, [limitations](docs/l1c/limitations.md) |
+
+| Cross-cutting | Contents |
+|---|---|
 | [product_hierarchy.md](docs/product_hierarchy.md) | L0→L2 levels: inputs, outputs, justification |
-| [remaining_levels.md](docs/remaining_levels.md) | Specs for L1A, L1C, L2A |
-| [l1c_spec.md](docs/l1c_spec.md) | L1C geometric design: sensor model, orthorectification, band co-registration |
-| [l1c_findings.md](docs/l1c_findings.md) | What measurement overturned: five assumptions, and how each was caught |
-| [decision_log.md](docs/decision_log.md) | Engineering decisions and trade-offs |
-| [limitations.md](docs/limitations.md) | Failure modes and next steps |
-| [validation_strategy.md](docs/validation_strategy.md) | How correctness is established |
-| [qa_report.md](docs/qa_report.md) | `qa_report.json` schema: metrics, flags, thresholds |
-| [generalisation.md](docs/generalisation.md) | Adapting to a new mission |
-| [performance.md](docs/performance.md) | Processing large strips: memory & performance |
-| [input_package.md](docs/input_package.md) | Expected input package layout |
+| [decision_log.md](docs/decision_log.md) | Engineering decisions and trade-offs, in order |
+| [remaining_levels.md](docs/remaining_levels.md) | Specs for the levels not yet built (L1A, L2A) |
+| [generalisation.md](docs/generalisation.md) | Adapting the framework to a new mission |
 | [references.md](docs/references.md) | Standards and tooling references |
+
+**[`docs/l1c/findings.md`](docs/l1c/findings.md)** is the one to read if you read only one:
+six of the geometric specification's load-bearing assumptions were wrong, four were
+indistinguishable from an irreducible platform error, and every one was caught by a check
+that could have failed.
 
 ---
 

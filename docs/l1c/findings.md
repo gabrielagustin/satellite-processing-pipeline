@@ -1,6 +1,6 @@
 # L1C — What Measurement Overturned
 
-The design of the geometric level is in [`l1c_spec.md`](l1c_spec.md). This document
+The design of the geometric level is in [`l1c_spec.md`](spec.md). This document
 is about how it got there, and it exists because the honest answer is: **six of its
 load-bearing assumptions were wrong, and measurement found every one of them.**
 
@@ -210,7 +210,7 @@ telemetry's frames, quaternion conventions and detector axes are not documented.
 are collected in `geometry.Convention`, all 384 combinations are enumerated, and the
 data chooses. Six of eight resolve decisively; the harness **reports the other two as
 unresolved** rather than crowning the least-bad — see
-[`l1c_spec.md`](l1c_spec.md) §4.3.
+[`l1c_spec.md`](spec.md) §4.3.
 
 **Validate a derived quantity against the data that produced it.** The angular rates
 are checked against the quaternion sequence. The geoid undulation is checked against

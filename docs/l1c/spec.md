@@ -6,7 +6,7 @@ radiance on a **projected map grid**, with all spectral bands resampled onto a
 single common grid.
 
 This document supersedes the L1C sketch in
-[`remaining_levels.md`](remaining_levels.md) with an implementable design. It is
+[`remaining_levels.md`](../remaining_levels.md) with an implementable design. It is
 written for a generic multispectral **pushbroom (linescan)** imager; every figure
 quoted as "measured" was derived from the reference acquisition used to develop
 the framework, and the procedure that derived it is reproducible from the
@@ -389,7 +389,7 @@ as a real product staggers them — and asserts that the harness recovers the fi
 resolvable axes and **admits** it cannot see the three parities. The synthetic is
 what makes this a test of the harness rather than of the scene.
 
-The resolution is recorded in [`decision_log.md`](decision_log.md).
+The resolution is recorded in [`decision_log.md`](../decision_log.md).
 
 ---
 
@@ -870,7 +870,7 @@ Extends `qa_report.json` with a `geometric` section:
 
 ## 12. Validation
 
-Layered as in [`validation_strategy.md`](validation_strategy.md):
+Layered as in [`validation_strategy.md`](validation.md):
 
 **Numerical correctness.**
 - Quaternion/rotation algebra against an independent implementation (`scipy.spatial.transform`).

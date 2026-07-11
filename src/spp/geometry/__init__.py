@@ -2,7 +2,7 @@
 
 Turns a detector sample into a ground point, by composing the platform's
 trajectory and pointing with the instrument's interior orientation. See
-``docs/l1c_spec.md`` for the design and the error budget.
+``docs/l1c/spec.md`` for the design and the error budget.
 """
 
 from spp.geometry.camera import BandOptics, Camera, CameraIntrinsics

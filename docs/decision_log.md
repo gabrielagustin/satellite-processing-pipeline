@@ -258,7 +258,7 @@ the data supports, using two probes that answer different questions:
 
 The two are deliberately **not** combined into one score. Without a GNSS lock even
 the correct model misses the delivered footprint by ~30 km (see
-[`l1c_spec.md`](l1c_spec.md) §3.2), so summing them would let that irreducible
+[`l1c_spec.md`](l1c/spec.md) §3.2), so summing them would let that irreducible
 bias swamp the hundreds-of-metres signal that separates the fine conventions. The
 footprint rejects gross failures; coherence ranks the survivors. Coherence fell
 from 8,449 m under the initial reading to **123 m** under the resolved one.
@@ -287,7 +287,7 @@ to catch than one that says it might be.
 **Context.** The platform telemetry delivers derivatives alongside the states —
 velocity with position, angular rates with attitude. Cubic Hermite interpolation
 can use them, and at a few hertz the accuracy is worth having, so
-[`l1c_spec.md`](l1c_spec.md) originally specified rate-aware interpolation for
+[`l1c_spec.md`](l1c/spec.md) originally specified rate-aware interpolation for
 both on the grounds that "the rates are delivered, so using them is free".
 
 **What happened.** They are not free. The delivered angular rates are **~55x
@@ -416,7 +416,7 @@ term the calibration file ships unpopulated.
 So the self-calibration is legitimate — but the **phasing was wrong**. Phase 4 is not a
 refinement that polishes good co-registration into sub-pixel co-registration; it is the
 prerequisite for co-registration existing at all. That is now recorded in
-[`l1c_spec.md`](l1c_spec.md) §14.1.
+[`l1c_spec.md`](l1c/spec.md) §14.1.
 
 **Choice.** Keep writing criteria that can fail, and state the *number* they must beat
 rather than the artefact they must produce. A criterion phrased as an output ("the file
@@ -429,4 +429,4 @@ shipping a product whose bands do not align, discovering it somewhere downstream
 having no record of which stage was responsible.
 
 **Related.** The same discipline, applied to inputs rather than phases, is entries 15,
-16 and 17. The full narrative is in [`l1c_findings.md`](l1c_findings.md).
+16 and 17. The full narrative is in [`l1c_findings.md`](l1c/findings.md).

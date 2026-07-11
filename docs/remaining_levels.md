@@ -61,7 +61,7 @@ L0 ingest.)*
 ## L1C — georeferencing / orthorectification
 
 > **Superseded.** This section is the original outline. L1C now has a full
-> implementable design in [`l1c_spec.md`](l1c_spec.md) — methods, error budget,
+> implementable design in [`l1c/spec.md`](l1c/spec.md) — methods, error budget,
 > QA schema and a phased implementation plan. Where the two differ, the spec
 > wins: it was written against the *verified* contents of the package, and it
 > corrects two assumptions made below (the geometric calibration is a placeholder,

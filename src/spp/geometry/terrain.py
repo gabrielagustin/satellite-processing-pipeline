@@ -3,7 +3,7 @@
 Georeferencing intersects the ray with an ellipsoid. **Ortho**rectification
 intersects it with the *terrain*, which is what removes relief displacement — and,
 for this instrument, what holds the spectral bands registered to each other over
-relief (see ``docs/l1c_spec.md`` §3.4: the bands are a short-baseline stereo pair,
+relief (see ``docs/l1c/spec.md`` §3.4: the bands are a short-baseline stereo pair,
 so terrain displaces them relative to one another far more than it displaces the
 product absolutely).
 

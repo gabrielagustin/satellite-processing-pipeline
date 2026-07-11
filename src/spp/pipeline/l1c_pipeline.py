@@ -53,7 +53,7 @@ RESOLVED_CONVENTION = Convention(
 The scan direction and the detector column sign are **not** resolved: they mirror the
 strip north-south and east-west, which leaves every geometric probe bit-identical. They
 are carried here as declared assumptions and flagged in the quality report. See
-``docs/l1c_spec.md`` §4.3.
+``docs/l1c/spec.md`` §4.3.
 """
 
 

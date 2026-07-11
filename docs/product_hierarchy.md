@@ -134,7 +134,7 @@ contaminating the calibration.
 expectation (decreasing from visible to NIR over the scene); per-band statistics
 and quality flags (NoData fraction, negative-radiance fraction, saturation,
 dynamic range) recorded in the QA report. See
-[`validation_strategy.md`](validation_strategy.md).
+[`validation_strategy.md`](l1b/validation.md).
 
 ---
 

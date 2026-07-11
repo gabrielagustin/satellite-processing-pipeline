@@ -14,7 +14,7 @@ is reconstructed from the pinhole model implied by the intrinsics (focal length,
 pixel pitch, principal point) and each band's detector row, and the calibration's
 line-of-sight term enters as an **additive angular correction** layered on top —
 zero as delivered, and estimable from the imagery itself (see
-``docs/l1c_spec.md``, band co-registration).
+``docs/l1c/spec.md``, band co-registration).
 
 That per-band row offset is not a detail. It is what makes each band look
 slightly forward or backward of the others, so it is simultaneously the cause of
