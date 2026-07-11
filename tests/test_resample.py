@@ -205,3 +205,29 @@ def test_ringing_kernels_are_refused():
     """Lanczos rings around saturation and NoData: not a cosmetic issue in radiance."""
     with pytest.raises(ValueError, match="negative lobes"):
         GeolocWarper(resampling=Resampling.lanczos)
+
+
+# -- locating an elevation model --------------------------------------------
+
+
+def test_dem_tiles_cover_every_degree_the_footprint_touches():
+    """A footprint spanning two degrees in each axis needs four tiles, not one.
+
+    Requesting too few silently truncates the elevation model at a tile boundary, and
+    the terrain correction then stops working halfway down the strip — with no error.
+    """
+    from spp.geometry.dem_source import tile_urls
+
+    urls = tile_urls((55.9, 26.4, 56.3, 27.5))  # crosses both 56E and 27N
+    assert len(urls) == 4
+    assert any("N26_00_E055" in u for u in urls)
+    assert any("N27_00_E056" in u for u in urls)
+
+
+def test_dem_tiles_handle_the_southern_and_western_hemispheres():
+    """Hemisphere prefixes are a classic silent-failure surface."""
+    from spp.geometry.dem_source import tile_urls
+
+    urls = tile_urls((-58.6, -34.9, -58.2, -34.4))
+    assert len(urls) == 1
+    assert "S35_00_W059" in urls[0]

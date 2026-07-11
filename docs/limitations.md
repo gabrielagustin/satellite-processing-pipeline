@@ -184,7 +184,7 @@ this scale, not at the next. See [`performance.md`](performance.md).
 
 ### Not yet built
 
-- A `spp-l1c` command-line entry point (the level currently runs as a library).
-- The geometric section of `qa_report.json` is **specified** ([`qa_report.md`](qa_report.md))
-  but not yet emitted.
 - A STAC item and a map-projected quicklook for the L1C product.
+- The `qa_report_l1c.json` the pipeline emits covers the conventions, grid, terrain,
+  interpolation, co-registration and flags, but is not yet merged into the single
+  `qa_report.json` the L1B stage writes.

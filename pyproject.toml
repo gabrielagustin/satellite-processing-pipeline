@@ -20,6 +20,7 @@ test = ["pytest>=7.0"]
 
 [project.scripts]
 spp-l1b = "spp.cli.run_l1b:main"
+spp-l1c = "spp.cli.run_l1c:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

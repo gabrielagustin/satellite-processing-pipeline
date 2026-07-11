@@ -1,0 +1,298 @@
+"""The L1C pipeline: L1B radiance in sensor coordinates to a projected map grid.
+
+Orchestration only. Every decision this stage makes lives in the modules it calls —
+the sensor model, the terrain, the self-calibration — and every one of them reports
+what it could *not* establish as loudly as what it could.
+
+The stage runs whether or not each piece succeeds, and records which did:
+
+* Without a reachable elevation model it georeferences on the ellipsoid, and says so.
+* Without enough textured imagery it skips the self-calibration, and says so.
+* It never resolves the two telemetry parities that geometry cannot see, and says so.
+
+A product that is missing a correction and admits it is worth more than one that is
+missing the same correction and looks finished.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+import rasterio
+
+from spp.geometry import geoloc_grid
+from spp.geometry.camera import Camera
+from spp.geometry.ephemeris import Attitude, Ephemeris
+from spp.geometry.frames import ecef_to_geodetic, eci_to_ecef_matrix
+from spp.geometry.sensor_model import Convention, SensorModel
+from spp.geometry.terrain import DEMTerrain, EllipsoidTerrain, TerrainModel
+from spp.geometry.timing import LineTiming
+from spp.refine import matcher, relative
+from spp.resample.grid import TargetGrid, native_gsd
+from spp.resample.warper import GeolocWarper
+
+logger = logging.getLogger(__name__)
+
+RESOLVED_CONVENTION = Convention(
+    ephemeris_frame="eci",
+    attitude_frame="lvlh",
+    quaternion_order="scalar_first",
+    quaternion_direction="body_to_ref",
+    scan_direction=1,
+    column_axis="y",
+    column_sign=1,
+    row_sign=-1,
+)
+"""The telemetry conventions, six resolved by measurement and two assumed.
+
+The scan direction and the detector column sign are **not** resolved: they mirror the
+strip north-south and east-west, which leaves every geometric probe bit-identical. They
+are carried here as declared assumptions and flagged in the quality report. See
+``docs/l1c_spec.md`` §4.3.
+"""
+
+
+@dataclass
+class L1CResult:
+    """What the run produced, and what it could not."""
+
+    products: dict[str, Path] = field(default_factory=dict)
+    qa: dict = field(default_factory=dict)
+    grid: TargetGrid | None = None
+
+
+class L1CPipeline:
+    """Georeference, orthorectify and co-register an acquisition.
+
+    Parameters
+    ----------
+    camera, ephemeris, attitude, timing:
+        The sensor model's components (see :mod:`spp.geometry.telemetry`).
+    terrain:
+        Elevation model. ``None`` georeferences on the ellipsoid — correct over water,
+        and displacing every metre of relief elsewhere.
+    convention:
+        How to read the telemetry. Defaults to the resolved set above.
+    reference_band:
+        The band the others are co-registered onto.
+    refine:
+        Estimate the missing per-band line-of-sight calibration from the imagery.
+    gsd_m:
+        Output resolution. Defaults to the native sampling, rounded up.
+    step:
+        Geolocation-lattice spacing, in detector samples.
+    """
+
+    def __init__(
+        self,
+        camera: Camera,
+        ephemeris: Ephemeris,
+        attitude: Attitude,
+        timing: dict[str, LineTiming],
+        *,
+        terrain: TerrainModel | None = None,
+        convention: Convention = RESOLVED_CONVENTION,
+        reference_band: str = "PAN",
+        refine: bool = True,
+        gsd_m: float | None = None,
+        step: int = geoloc_grid.DEFAULT_STEP,
+    ) -> None:
+        self.camera = camera
+        self.ephemeris = ephemeris
+        self.attitude = attitude
+        self.timing = timing
+        self.terrain = terrain or EllipsoidTerrain()
+        self.convention = convention
+        self.reference_band = reference_band
+        self.refine = refine
+        self.gsd_m = gsd_m
+        self.step = step
+
+        self.model = SensorModel(camera, ephemeris, attitude, timing, convention=convention)
+        self.native_gsd_m = self._native_gsd()
+
+    # -- public API ---------------------------------------------------------
+
+    def run(self, l1b_dir: Path, output_dir: Path, bands: list[str] | None = None) -> L1CResult:
+        """Process every band, and write the products and the quality report."""
+        bands = bands or sorted(self.timing)
+        paths = {band: l1b_dir / f"{band}.tif" for band in bands}
+        missing = [b for b, p in paths.items() if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"No L1B raster for band(s) {', '.join(missing)} in {l1b_dir}. "
+                "Run the L1B stage first (`spp-l1b`)."
+            )
+
+        qa: dict = {
+            "conventions": {
+                "resolved": self.convention.describe(),
+                "assumed": ["scan_direction", "column_sign"],
+            },
+            "grid": {},
+            "terrain": self._terrain_qa(),
+            "coregistration": {},
+            "los_correction": {},
+            "flags": ["no_gnss_lock", "absolute_accuracy_unvalidated", "conventions_assumed"],
+        }
+
+        model = self.model
+        if self.refine and self.reference_band in bands:
+            model = self._self_calibrate(paths, bands, qa)
+        elif self.refine:
+            logger.warning(
+                "Reference band %s not among the bands processed; skipping the "
+                "self-calibration. The bands will not be co-registered.",
+                self.reference_band,
+            )
+            qa["flags"].append("coregistration_not_achieved")
+
+        logger.info("Building geolocation grids (lattice step %d)...", self.step)
+        grids = {}
+        with rasterio.open(paths[bands[0]]) as probe:
+            n_lines, n_columns = probe.height, probe.width
+        for band in bands:
+            grids[band] = geoloc_grid.build(
+                model,
+                band,
+                n_lines=n_lines,
+                n_columns=n_columns,
+                terrain=self.terrain,
+                step=self.step,
+            )
+
+        target = TargetGrid.covering(
+            {b: g.bounds for b, g in grids.items()},
+            native_gsd_m=self.native_gsd_m,
+            gsd_m=self.gsd_m,
+        )
+        qa["grid"] = {
+            "crs": target.crs.to_string(),
+            "gsd_m": target.gsd_m,
+            "native_gsd_m": round(target.native_gsd_m, 3),
+            "shape": [target.height, target.width],
+            "zone_straddle": target.zone_straddle,
+        }
+        if target.zone_straddle:
+            qa["flags"].append("zone_straddle")
+
+        qa["interpolation"] = {
+            "lattice_step_px": self.step,
+            "max_error_px": round(
+                geoloc_grid.interpolation_error_px(
+                    model,
+                    grids[bands[0]],
+                    bands[0],
+                    terrain=self.terrain,
+                    gsd_m=self.native_gsd_m,
+                ),
+                4,
+            ),
+        }
+
+        warper = GeolocWarper()
+        products = {}
+        for band in bands:
+            logger.info("Warping %s...", band)
+            products[band] = warper.warp(
+                paths[band], grids[band], target, output_dir / f"{band}.tif"
+            )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "qa_report_l1c.json").write_text(json.dumps(qa, indent=2))
+        logger.info("Wrote %d band(s) and qa_report_l1c.json to %s", len(products), output_dir)
+
+        return L1CResult(products=products, qa=qa, grid=target)
+
+    # -- internals ----------------------------------------------------------
+
+    def _native_gsd(self) -> float:
+        """Ground sample distance from the ephemeris — never from a data sheet."""
+        mid = float(np.median(self.ephemeris.times))
+        position, _ = self.ephemeris.interpolate(np.array([mid]))
+        if self.convention.ephemeris_frame == "eci":
+            position = np.einsum("mij,mj->mi", eci_to_ecef_matrix(np.array([mid])), position)
+        altitude = float(ecef_to_geodetic(position)[0, 2])
+        gsd = native_gsd(
+            altitude, self.camera.intrinsics.pixel_size_mm, self.camera.intrinsics.focal_length_mm
+        )
+        logger.info("Altitude %.1f km -> native ground sample distance %.2f m", altitude / 1000, gsd)
+        return gsd
+
+    def _terrain_qa(self) -> dict:
+        if isinstance(self.terrain, DEMTerrain):
+            return {
+                "source": "digital elevation model",
+                "undulation_range_m": [
+                    round(float(self.terrain.geoid.undulation.min()), 2),
+                    round(float(self.terrain.geoid.undulation.max()), 2),
+                ],
+                "void_fraction": round(self.terrain.void_fraction, 3),
+            }
+        return {
+            "source": "ellipsoid (no elevation model)",
+            "note": "georeferenced, NOT orthorectified: relief is displaced",
+        }
+
+    def _self_calibrate(self, paths: dict[str, Path], bands: list[str], qa: dict) -> SensorModel:
+        """Estimate the per-band line-of-sight offsets the calibration file omits."""
+        logger.info("Self-calibrating the interior orientation against %s...", self.reference_band)
+
+        with rasterio.open(paths[self.reference_band]) as src:
+            reference = src.read(1)
+
+        corrections = {}
+        achieved = True
+        for band in bands:
+            if band == self.reference_band:
+                continue
+            with rasterio.open(paths[band]) as src:
+                moving = src.read(1)
+
+            matches = matcher.match_windows(reference, moving, window=384, stride=768)
+            correction = relative.estimate(
+                model=self.model,
+                band=band,
+                reference_band=self.reference_band,
+                matches=matches,
+                terrain=self.terrain,
+                gsd_m=self.native_gsd_m,
+            )
+            qa["coregistration"][band] = {
+                "n_windows": correction.n_windows,
+                "systematic_before_px": round(correction.residual_before_px, 3),
+                "systematic_after_px": round(correction.residual_after_px, 3),
+                "scatter_px": round(correction.scatter_px, 3),
+                "position_correlation": round(correction.position_correlation, 3),
+                "fitted": correction.fitted,
+                "reason": correction.reason,
+            }
+            if correction.fitted:
+                corrections[band] = ((correction.along_rad,), (correction.across_rad,))
+                qa["los_correction"][band] = {
+                    "along_rad": correction.along_rad,
+                    "across_rad": correction.across_rad,
+                }
+            else:
+                achieved = False
+
+        if not achieved:
+            # Refusing to fit is the correct outcome for a band whose residual varies
+            # with position -- but the product is then not co-registered, and must say so.
+            qa["flags"].append("coregistration_not_achieved")
+
+        if not corrections:
+            logger.warning("No band could be calibrated; the bands will not be co-registered.")
+            return self.model
+
+        return SensorModel(
+            self.camera.with_los(corrections),
+            self.ephemeris,
+            self.attitude,
+            self.timing,
+            convention=self.convention,
+        )

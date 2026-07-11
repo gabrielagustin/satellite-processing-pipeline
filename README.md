@@ -71,6 +71,47 @@ Or without installing:
 PYTHONPATH=src python -m spp.cli.run_l1b --input <package> --output <out>
 ```
 
+### L1C — georeference, orthorectify and co-register
+
+Takes the acquisition package (for the platform telemetry and the calibration) and the
+**L1B rasters** (for the pixels):
+
+```bash
+spp-l1c --input  /path/to/acquisition_package \
+        --l1b    /path/to/l1b_output \
+        --output /path/to/l1c_output
+```
+
+The elevation model is fetched automatically from Copernicus GLO-30 over the network —
+no account, no manual download. Supply your own with `--dem <raster-or-vrt>`, or skip
+terrain entirely with `--no-dem` (which georeferences but does **not** orthorectify, and
+says so).
+
+Writes one projected `float32` radiance raster per band on a common UTM grid, plus
+`qa_report_l1c.json`. A full 8-band run takes roughly 7 minutes and needs ~2 GB of RAM.
+Try two bands first:
+
+```bash
+spp-l1c --input <package> --l1b <l1b_out> --output <l1c_out> --bands PAN RE1
+```
+
+**Read the run's closing summary.** It ends with a section headed *NOT ESTABLISHED BY
+THIS RUN*, which lists what the product does **not** demonstrate — the absolute
+geolocation is unvalidated against anything independent of the telemetry, two telemetry
+conventions are assumed rather than resolved, and some bands may have been refused by the
+self-calibration. The rasters look finished whether or not any of that is true, which is
+why the run says it out loud. See [`docs/limitations.md`](docs/limitations.md).
+
+| Flag | Meaning |
+|---|---|
+| `--bands B G R ...` | Subset of bands (default: all) |
+| `--dem <path>` | Elevation raster or virtual mosaic (default: fetch Copernicus GLO-30) |
+| `--no-dem` | Georeference on the ellipsoid; do **not** orthorectify |
+| `--gsd N` | Output resolution in metres (default: the native sampling, rounded up) |
+| `--reference-band B` | Band the others co-register onto (default: `PAN`) |
+| `--no-refine` | Skip the self-calibration; the bands will **not** be co-registered |
+| `--step N` | Geolocation-lattice spacing in pixels (default 8, matched to the DEM) |
+
 ### Expected input
 
 An acquisition package directory containing:
