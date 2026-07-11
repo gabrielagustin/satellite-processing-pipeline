@@ -124,22 +124,30 @@ basemap, the bands stack without complaint.
 | Band co-registration | **Does not work.** The bands are still ~8 px apart |
 | Absolute accuracy | **Unvalidated** against anything independent of the telemetry |
 
-### Band co-registration does not yet work
+### Band co-registration is partly solved, and the rest is attitude
 
-Resampling through the physical model left the band residual where it started: 30.2 m
-before, 33.2 m after. The model carries a per-band error of its own — a constant
-(−5.1, +6.5) px — the same size as the misregistration it was meant to remove.
+The missing interior orientation is now **estimated from the imagery**: the sensor model
+inverts the measured band-to-band displacement into a per-band line-of-sight offset, and
+for **five of seven bands** that drives the systematic error from 1.4–5.3 px to
+**~0.005 px**. Those offsets are written out in the same schema the Calibration Parameter
+File ships empty.
 
-The cause is diagnosed, not merely suspected: the residual is **constant across the
-whole strip and the whole swath** (correlations with along-track and cross-track
-position: −0.09, −0.05, +0.01, −0.17). A residual that does not vary with position is a
-fixed angular offset per band — the **interior orientation** — which is precisely the
-per-band line-of-sight term the Calibration Parameter File ships unpopulated. Eight
-detector pixels of offset is an ordinary amount of optical distortion for an instrument
-whose geometric calibration was never filled in.
+**Two bands are refused**, and correctly. The estimator declines to fit a band whose
+residual varies with position, because a constant angular offset cannot represent one.
+The two refused bands (B and RE3) are the furthest from the reference on the detector,
+and the position-dependence grows with each band's **time separation** from the reference
+(correlation +0.82). That is not optics — it is **attitude**: the bands are up to 0.47 s
+apart, the attitude jitters by ~0.005° about a smooth fit (about 9 px on the ground), and
+that jitter does not cancel across half a second.
 
-**Next step.** Estimate the missing calibration from the imagery (the self-calibration
-of [`l1c_spec.md`](l1c_spec.md) §8.2). It is not a refinement; it is the prerequisite.
+**A ~2 px floor remains even where the fit succeeds.** Window-to-window scatter of
+1.4–2.7 px survives the correction, and no constant offset touches it. The product is
+therefore **closer to co-registered than L1B, but not co-registered**.
+
+**Next step.** The remaining error needs attitude smoothing or estimation, not a
+line-of-sight coefficient. Fitting it into the calibration would produce a per-band
+"optical" correction that is really a snapshot of this scene's pointing noise — wrong for
+every other acquisition of the same instrument.
 
 ### Absolute accuracy is unvalidated
 

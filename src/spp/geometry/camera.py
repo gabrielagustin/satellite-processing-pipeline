@@ -242,6 +242,24 @@ class Camera:
         d_body = d_body @ self.boresight.T
         return d_body / np.linalg.norm(d_body, axis=-1, keepdims=True)
 
+    def effective_los(self, band: str) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """The line-of-sight coefficients actually in force for a band.
+
+        The *stored* coefficients may be the unpopulated sentinel
+        (:data:`UNPOPULATED_LOS_SENTINEL`), which is not a correction and is never
+        applied. Anything building on the current calibration — the self-calibration,
+        above all — must start from what is **in force**, not from what is stored.
+
+        Reading the raw coefficients instead would treat the sentinel's leading ``1.0``
+        as a one-radian offset (57 degrees) and inherit it as the baseline for a
+        correction, producing a confidently-computed, catastrophically wrong result.
+        """
+        optics = self._optics(band)
+        return (
+            _usable_coefficients(optics.los_along, band, "along"),
+            _usable_coefficients(optics.los_across, band, "across"),
+        )
+
     def with_boresight(self, boresight: np.ndarray) -> Camera:
         """Return a copy of this camera with a different boresight matrix.
 

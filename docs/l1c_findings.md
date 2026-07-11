@@ -1,10 +1,10 @@
 # L1C — What Measurement Overturned
 
 The design of the geometric level is in [`l1c_spec.md`](l1c_spec.md). This document
-is about how it got there, and it exists because the honest answer is: **five of its
+is about how it got there, and it exists because the honest answer is: **six of its
 load-bearing assumptions were wrong, and measurement found every one of them.**
 
-None of the five announced itself. Each produced a plausible product, a finite
+None of the six announced itself. Each produced a plausible product, a finite
 number, a model that converged. Four of them looked exactly like an *irreducible
 platform error* — the kind of thing you shrug at, attribute to the hardware, and
 route into a refinement stage. That is what makes them worth writing down: not the
@@ -15,7 +15,7 @@ apart from the truth.
 
 ## The pattern
 
-Every one of the five followed the same shape:
+Every one of them followed the same shape:
 
 1. An assumption was made about the input, reasonably, from domain knowledge.
 2. The assumption was never stated as a *question*, so nothing tested it.
@@ -197,8 +197,9 @@ have passed.
 | 4 | Rates are the attitude's derivative | 105 m | an irreducible residual | checking them against the quaternions |
 | 5 | The model can co-register the bands | — | a phase that would have passed | an exit criterion that could fail |
 
-Four of the five were **indistinguishable from a real, irreducible platform error**
-until they were measured against something independent.
+Four of them were **indistinguishable from a real, irreducible platform error** until
+they were measured against something independent. Two more (below) were caught only by
+checks written for no other purpose than to be able to fail.
 
 ---
 
@@ -241,3 +242,61 @@ rather than results:
 - **The bands are not co-registered.** See finding 5.
 
 See [`limitations.md`](limitations.md) for the product's honest state.
+
+---
+
+## 6. The sign of a match, and the guardrail that refused
+
+Two things happened in the self-calibration, and both are the same lesson as the five
+above.
+
+### The sentinel that was almost written into the calibration
+
+The estimator's first run produced a corrected model whose residual was **275,000
+pixels**. The cause: the correction was built on top of the line-of-sight coefficients
+*as stored*, and what is stored is the unpopulated sentinel `[1.0, 0, 0, ...]`. Read
+literally, that leading `1.0` is a **one-radian** — 57 degree — line-of-sight offset.
+The sentinel is detected and ignored when the model *evaluates* the coefficients, but
+inheriting it as the *baseline for a new correction* reintroduced it.
+
+Nothing about the arithmetic complained. The fit converged, the numbers were finite, the
+correction was self-consistent. What caught it was `residual_after_px` — a field that
+exists for no other purpose than to prove the correction did what it claimed.
+
+### The sign that would have doubled the error
+
+Corrected, the estimator drove the systematic residual to 0.007 px — and the warped
+product got **worse**: 15.3 px against 8.3 px before. Roughly double.
+
+The matcher's sign convention was inverted from what the estimator assumed. Phase
+correlation of `(reference, moving)` returns `−d` where the moving image is the
+reference translated by `+d`, so the feature at `moving[l, c]` is the one at
+`reference[l + dline, c + dcolumn]` — not `[l − dline, c − dcolumn]`.
+
+A sign error here does not weaken a correction. It **doubles the error it was meant to
+remove**, and every intermediate number stays plausible, because the arithmetic is
+perfectly self-consistent about the wrong thing. It was found by translating an image by
+a known amount and asking the matcher what it saw — a test that now guards it
+permanently, and the one test in the suite that must never be "fixed" by flipping the
+expectation.
+
+### The guardrail that refused two bands
+
+The estimator declines to fit a band whose residual **varies with position**, on the
+grounds that a constant angular offset cannot represent one, and fitting it anyway would
+bury the real cause inside the optical calibration. It refused the B and RE3 bands.
+
+They are the two furthest from the reference band on the detector — and the
+position-dependence turns out to grow with the band's **time separation** from the
+reference (correlation +0.82). A fixed optical offset cannot do that. Attitude can: the
+bands are up to 0.47 s apart, and the attitude jitters by ~0.005° about a smooth fit,
+which is about 9 px on the ground and does not cancel across half a second.
+
+So the residual for those two bands is **not optical, it is attitude**, and the
+line-of-sight term is the wrong instrument for it. Had the guardrail not been there, the
+fit would have succeeded, the numbers would have looked excellent, and the result would
+have been a per-band "optical calibration" that was really a snapshot of this scene's
+pointing noise — **wrong for every other acquisition of the same instrument**, while
+looking, on this one, like a success.
+
+That is the whole argument for the guardrail, and it only ever pays off by refusing.
