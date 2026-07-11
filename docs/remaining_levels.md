@@ -60,6 +60,14 @@ L0 ingest.)*
 
 ## L1C — georeferencing / orthorectification
 
+> **Superseded.** This section is the original outline. L1C now has a full
+> implementable design in [`l1c_spec.md`](l1c_spec.md) — methods, error budget,
+> QA schema and a phased implementation plan. Where the two differ, the spec
+> wins: it was written against the *verified* contents of the package, and it
+> corrects two assumptions made below (the geometric calibration is a placeholder,
+> not a populated per-column line-of-sight table; and the nominal ground sample
+> distance and swath do not describe the reference acquisition).
+
 **Goal.** Resample each L1B radiance band onto a projected map grid (defined CRS,
 e.g. UTM), co-registering bands to a common ground geometry. **This is the
 external-data-dependent geometric level.**
