@@ -33,6 +33,7 @@ from spp.geometry.camera import Camera
 from spp.geometry.ephemeris import Attitude, Ephemeris
 from spp.geometry.frames import (
     ecef_to_geodetic,
+    eci_to_ecef_matrix,
     lvlh_to_parent_matrix,
     quat_conjugate,
     quat_to_matrix,
@@ -304,46 +305,3 @@ def _reorder(q: np.ndarray, order: QuaternionOrder) -> np.ndarray:
     if order == "scalar_first":
         return q
     return np.roll(q, 1, axis=-1)  # (x, y, z, w) -> (w, x, y, z)
-
-
-def eci_to_ecef_matrix(t: np.ndarray) -> np.ndarray:
-    """Rotation from an inertial frame to ECEF: a spin about the polar axis.
-
-    Earth rotation is modelled as a rotation through the Greenwich Mean Sidereal
-    Time angle. Precession, nutation and polar motion are neglected — they are
-    arcsecond-level effects, far below the pointing uncertainty that dominates
-    this level's error budget.
-
-    Parameters
-    ----------
-    t:
-        Times, shape ``(m,)``, seconds (Unix epoch).
-
-    Returns
-    -------
-    numpy.ndarray
-        Array of shape ``(m, 3, 3)``.
-    """
-    t = np.atleast_1d(np.asarray(t, dtype=np.float64))
-    # Julian centuries from J2000.0 (Unix epoch 946728000 = 2000-01-01T12:00Z).
-    jd_ut1 = 2451545.0 + (t - 946728000.0) / 86400.0
-    tc = (jd_ut1 - 2451545.0) / 36525.0
-
-    gmst_s = (
-        67310.54841
-        + (876600.0 * 3600.0 + 8640184.812866) * tc
-        + 0.093104 * tc**2
-        - 6.2e-6 * tc**3
-    )
-    theta = np.radians((gmst_s % 86400.0) / 240.0)  # 240 s of time = 1 degree
-
-    cos_t, sin_t = np.cos(theta), np.sin(theta)
-    zero, one = np.zeros_like(theta), np.ones_like(theta)
-    return np.stack(
-        [
-            np.stack([cos_t, sin_t, zero], axis=-1),
-            np.stack([-sin_t, cos_t, zero], axis=-1),
-            np.stack([zero, zero, one], axis=-1),
-        ],
-        axis=-2,
-    )

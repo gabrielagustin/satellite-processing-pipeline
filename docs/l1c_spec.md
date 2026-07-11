@@ -214,12 +214,21 @@ Internally consistent (§2.3) does not mean absolutely accurate — a propagated
 orbit can be self-consistent while being displaced bodily by hundreds of metres
 to kilometres.
 
-Combined with the error budget (§9), where attitude knowledge dominates by an
-order of magnitude, this means **the physical model alone cannot deliver a
-defensible absolute accuracy figure.** Hence the image-based refinement in §8.1,
-and hence the decision *not* to quietly snap the product to the delivered
-footprint: doing so would make the footprint check circular and hide the real
-error.
+**Measured (Phase 1): the model reproduces the delivered footprint to 208 m.**
+That is far better than this section originally feared — but it must be read for
+what it is. The delivered footprint was almost certainly computed by the provider
+from *the same telemetry*, so 208 m demonstrates that an independent implementation
+agrees with theirs. It is a strong check on the **model**; it is **not** a
+measurement of absolute accuracy, because both sides inherit whatever error the
+propagated orbit carries.
+
+So the conclusion stands, for a different reason than first stated: **the physical
+model alone cannot deliver a defensible absolute accuracy figure** — not because it
+is imprecise, but because nothing in the package is independent of the telemetry it
+would have to be checked against. Hence the image-based refinement in §8.1, against
+an external reference, and hence the decision *not* to snap the product to the
+delivered footprint: that would turn the one available consistency check into a
+tautology.
 
 ### 3.3 The geometric calibration shipped is a placeholder
 
@@ -293,9 +302,15 @@ first assumed. They are resolved empirically by a harness
 | Quaternion component order | scalar-first · scalar-last | **scalar-first** — resolved |
 | Detector column axis | camera *x* · camera *y* | **y** — resolved |
 | Detector row sign | + · − | **−** — resolved |
-| Quaternion direction | body→reference · reference→body | body→reference — *not resolved* |
-| Scan direction | row 0 = first line · = last | +1 assumed — *not resolved* |
-| Detector column sign | + · − | + assumed — *not resolved* |
+| Quaternion direction | body→reference · reference→body | **body→reference** — resolved (Phase 1) |
+| Scan direction | row 0 = first line · = last | +1 assumed — *not resolvable by geometry* |
+| Detector column sign | + · − | + assumed — *not resolvable by geometry* |
+
+**Six of eight resolved.** The two that remain are the two *structural* parities —
+a north–south mirror and an east–west mirror — and they are not merely unresolved,
+they are **provably invisible** to geometry: each maps the footprint's corners onto
+each other and displaces every band identically, so both probes return bit-identical
+scores. Only image content can settle them (§8.1).
 
 ### 4.1 The ephemeris is not Earth-fixed
 
@@ -330,7 +345,8 @@ very error the footprint cannot see past.
 
 So the footprint rejects gross failures and coherence ranks the survivors.
 Coherence fell from **8,449 m** under the initial (wrong) reading to **123 m** under
-the resolved one — a signal the footprint probe alone could never have seen.
+the resolved conventions, and to **18 m** once Phase 1 fixed the two modelling
+errors below — a signal the footprint probe alone could never have seen.
 
 ### 4.3 What the geometry cannot see, and why that is not a failure
 
@@ -348,6 +364,42 @@ These need **image content**, not geometry: matching against a reference orthoim
 (§8.1) is the test that settles them, and it is deferred to that phase. Until then
 the values above are recorded as **assumptions, flagged as such** in the quality
 report. A harness that reported them as "resolved" would be manufacturing a result.
+
+### 4.5 Two modelling errors the harness then exposed *(Phase 1)*
+
+Resolving the conventions left a **32.8 km** footprint error, which looked exactly
+like the platform bias §3.2 predicts. It was not. It was two bugs in this
+specification, and both were found by asking where the error pointed rather than
+assuming it was irreducible.
+
+**Precession (32.8 km → 208 m).** The first Earth-rotation model applied only
+Greenwich Mean Sidereal Time, on the stated grounds that "precession, nutation and
+polar motion are arcsecond-level effects". That is wrong by four orders of
+magnitude: precession accumulates at ~50 arcseconds *per year*, so a quarter-century
+past J2000 it is a third of a degree — **tens of kilometres** at orbital radius. The
+residual matched it in both components: −33.9 km east against 46.12″/yr × 26.2 yr =
+−33.5 km predicted, and −16.5 km north against 20.04″/yr × 26.2 yr = −16.2 km. The
+ephemeris is in J2000, and the chain must be precession → nutation → Earth rotation.
+
+**Angular rates that are not the attitude's derivative (123 m → 18 m).** This
+document argued for rate-aware attitude interpolation on the grounds that the rates
+are delivered, so using them is free accuracy. They are delivered — but they are
+**~55× larger** than the rotation the quaternion sequence itself undergoes between
+samples. They describe the body's motion in some other frame, not the drift of the
+small attitude offset the quaternions encode. Used as Hermite endpoint slopes they
+inject rotation that was never there.
+
+The failure mode is not the obvious one, which is why it is worth stating: a slope
+of merely the wrong *magnitude* largely cancels, because the two Hermite endpoint
+weights sum to `s(2s−1)(s−1)`, which vanishes at the midpoint. The damage comes from
+a rate pointing along a **different axis**. The fix is not a flag but a **check**:
+the rates are compared against the quaternion sequence and silently ignored when they
+disagree (`Attitude.rates_are_consistent`), because the caller has no way to know
+what the data contains.
+
+The lesson generalises, and it is the reason both bugs are recorded here rather than
+quietly patched: **a "refinement" that is not validated against the data can make a
+model worse, and it will look like an irreducible bias while it does.**
 
 ### 4.4 Deliverable
 
@@ -389,15 +441,22 @@ Interpolate platform state to `t(ℓ)`:
   *and velocities*. Velocity is delivered, so it should be used: Hermite is exact
   to well under a millimetre here, against ~6 cm for linear interpolation. It is
   free, so there is no reason to accept the error.
-- **Attitude** — the sampled quaternions *and* angular rates are both delivered,
-  so interpolate with rate-aware cubic interpolation (Hermite in rotation-vector
-  space, or SQUAD — Spherical and Quadrangle interpolation). Plain SLERP
-  (Spherical Linear intERPolation) ignores the rates and is the fallback.
+- **Attitude** — SLERP (Spherical Linear intERPolation), *not* the rate-aware
+  cubic this document originally specified. The angular rates are delivered, but
+  they are **not the derivative of the delivered quaternions** (§4.5), and using
+  them as interpolation slopes made the model seven times worse. They are checked
+  against the quaternion sequence and ignored when they disagree — automatically,
+  because no caller can know in advance what a given payload delivers.
 
-At ~4 Hz sampling with a body rate of ~7 mrad/s, the attitude changes ~0.094°
-between samples — roughly **650 m on the ground**. Interpolation quality is
-therefore not a detail; it is a first-order term in the error budget (§9), and it
-is the reason for using the angular rates rather than discarding them.
+  Rate-aware interpolation remains the right choice *when the rates are the
+  derivative*, and the code takes that path when the check passes. The point is
+  that it is a **check**, not an assumption.
+
+Between samples the attitude changes by ~0.005° root-mean-square about a smooth
+fit — about **35 m on the ground**, with excursions to 157 m. That jitter is real
+telemetry noise, and it is now the floor on what the model can achieve without
+smoothing the attitude; it is the largest remaining term in the band-registration
+budget (§9).
 
 ### 5.3 The viewing ray
 
@@ -665,8 +724,13 @@ GSD 3.77 m):
 |---|---:|---:|---:|
 | **Attitude knowledge** | 0.01° | **69 m** | **18 px** |
 | Attitude knowledge (poor) | 0.1° | 695 m | 184 px |
-| Attitude interpolation, 4 Hz, rate-aware | ~0.001° | ~7 m | ~2 px |
+| **Attitude jitter** (measured, §5.2) | 0.005° rms | **35 m** rms, 157 m peak | 9 px rms |
+| Attitude interpolation, SLERP at 4 Hz | — | below the jitter | — |
+| ~~Attitude interpolation, rate-aware~~ | ~~free accuracy~~ | **made it worse** — §4.5 | — |
 | **Position (no GNSS lock)** | 10²–10³ m | 10²–10³ m | 26–265 px |
+| Precession, if neglected (§4.5) | 0.34° of frame rotation | **38 km** | 10,000 px |
+| **Model vs delivered footprint** (measured) | — | **208 m** | 55 px |
+| **Model vs measured band offsets** (Phase 1) | — | 3.1 px along, 5.8 px across | — |
 | Clock offset, if not applied | 6.36 ms | 46 m | 12 px |
 | Clock offset, applied | ≪1 ms | <7 m | <2 px |
 | Ephemeris interpolation (Hermite) | — | <0.001 m | ~0 |
@@ -845,7 +909,7 @@ between them.
 | Phase | Deliverable | Exit criterion |
 |---|---|---|
 | **0** | This spec + the convention harness (§4) | Frame, quaternion and scan conventions resolved and pinned by a test |
-| **1** | Frames, timing, ephemeris, camera; sensor model on the **ellipsoid** | Computed footprint matches the STAC geometry within a few km |
+| **1** ✅ | Frames, timing, ephemeris, camera; sensor model on the **ellipsoid** | ~~Computed footprint matches the STAC geometry within a few km~~ → **208 m**. Band coherence 18 m (4.8 px); model band offsets agree with the imagery to 3.1 px along-track, 5.8 px across. Six of eight conventions resolved |
 | **2** | DEM + geoid + iterative terrain intersection | Intersection converges; heights validated against the geoid |
 | **3** | Geolocation grid + warp → **first L1C products** (model-only) | Eight bands on one grid, and the band residual has **fallen below the 1–7 px it starts at** (§2.4). This is the test that the model is real: if the residual does not shrink, stop — the model is wrong, and no amount of refinement will save it |
 | **4** | Relative refinement — self-calibrated per-band LoS (§8.2) | Band-to-band residual < 0.3 px, uncorrelated with terrain height |

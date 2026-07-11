@@ -272,3 +272,116 @@ def test_state_histories_reject_bad_input():
             positions=np.zeros((2, 3)),
             velocities=np.zeros((3, 3)),
         )
+
+
+# -- angular rates that are not the attitude's derivative -------------------
+
+
+def test_consistent_rates_are_recognised():
+    """Rates that really are the quaternion's slope must be accepted and used."""
+    t = np.arange(0.0, 5.0, 0.25)
+    rate = np.array([0.0, 0.0, 0.02])
+    att = Attitude(
+        times=t,
+        quaternions=quat_from_rotvec(rate * t[:, None]),
+        rates=np.broadcast_to(rate, (t.size, 3)),
+    )
+    assert att.rates_are_consistent
+
+
+def test_inconsistent_rates_are_rejected_and_slerp_takes_over():
+    """The trap the reference acquisition set, pinned.
+
+    The delivered angular rates were ~55x larger than the rotation the quaternion
+    sequence actually undergoes: they describe motion in a different frame. Used
+    as Hermite endpoint slopes they overshoot wildly, and the model gets *worse*.
+
+    The rates must therefore be checked against the quaternions and ignored when
+    they disagree — and asking for `rate_aware=True` must not be able to override
+    that, because the caller cannot know what the data contains.
+    """
+    t = np.arange(0.0, 5.0, 0.25)
+    true_rate = np.array([0.0, 0.0, 0.002])
+    quaternions = quat_from_rotvec(true_rate * t[:, None])
+    bogus = np.broadcast_to(true_rate * 55.0, (t.size, 3))
+
+    att = Attitude(times=t, quaternions=quaternions, rates=bogus)
+    assert not att.rates_are_consistent
+
+    # Asking for rate-awareness must yield the SLERP answer, not the overshoot.
+    slerp = Attitude(times=t, quaternions=quaternions).interpolate(t[:-1] + 0.125)
+    guarded = att.interpolate(t[:-1] + 0.125, rate_aware=True)
+    np.testing.assert_allclose(quat_to_matrix(guarded), quat_to_matrix(slerp), atol=1e-12)
+
+
+def test_the_overshoot_the_guard_prevents_is_real():
+    """The guard is not defensive boilerplate — without it the error is large.
+
+    Pinning the magnitude keeps the rationale honest: if bogus rates were harmless,
+    the check would be dead weight and should be deleted.
+
+    The mechanism is worth stating, because it is not the obvious one. A wrong rate
+    that merely has the wrong *magnitude* is largely harmless: the two Hermite
+    endpoint terms carry weights `h10` and `h11` that sum to `s(2s-1)(s-1)`, which
+    vanishes at the midpoint, so a constant too-steep slope mostly cancels itself.
+    The damage comes from a rate pointing along a **different axis** — which is
+    exactly what the reference acquisition delivers, its rates describing the body's
+    motion in some other frame rather than the drift of the attitude offset. That
+    injects rotation the quaternions never contained, and it does not cancel.
+    """
+    t = np.arange(0.0, 5.0, 0.25)
+    true_rate = np.array([0.0, 0.0, 0.002])
+    quaternions = quat_from_rotvec(true_rate * t[:, None])
+
+    # As delivered: far larger, and about a different axis.
+    bogus_rates = np.broadcast_to(np.array([0.0, 0.11, 0.0]), (t.size, 3))
+
+    # Sample away from the midpoint, where the endpoint weights do not cancel.
+    dt = 0.25
+    t_eval = t[:-1] + 0.21 * dt
+    truth = quat_from_rotvec(true_rate * t_eval[:, None])
+
+    def peak_error(got: np.ndarray) -> float:
+        """Largest rotation angle between `got` and the truth, radians."""
+        delta = quat_multiply(quat_conjugate(truth), got)
+        return float(np.linalg.norm(quat_to_rotvec(delta), axis=-1).max())
+
+    # What the guard produces: SLERP, exact on a constant-rate rotation.
+    guarded = Attitude(times=t, quaternions=quaternions, rates=bogus_rates)
+    assert not guarded.rates_are_consistent
+    assert peak_error(guarded.interpolate(t_eval, rate_aware=True)) < 1e-9
+
+    # Rates that *are* the derivative are accepted, and Hermite is exact too.
+    honest = Attitude(
+        times=t, quaternions=quaternions, rates=np.broadcast_to(true_rate, (t.size, 3))
+    )
+    assert honest.rates_are_consistent
+    assert peak_error(honest.interpolate(t_eval, rate_aware=True)) < 1e-9
+
+    # And what believing the delivered rates would have cost: an error larger than
+    # the entire rotation being interpolated.
+    segment_rotation = float(np.linalg.norm(true_rate) * dt)
+    forced = _hermite_with_rates(quaternions, t, bogus_rates, t_eval)
+    assert peak_error(forced) > 2.0 * segment_rotation
+
+
+def _hermite_with_rates(
+    quaternions: np.ndarray, t: np.ndarray, rates: np.ndarray, t_eval: np.ndarray
+) -> np.ndarray:
+    """Rate-aware interpolation with the consistency guard deliberately bypassed.
+
+    Only a test has any business doing this — it exists to show what the guard is
+    for, by reproducing the failure it prevents.
+    """
+    idx = np.clip(np.searchsorted(t, t_eval, side="right") - 1, 0, t.size - 2)
+    dt = (t[idx + 1] - t[idx])[:, None]
+    s = ((t_eval - t[idx]) / dt[:, 0])[:, None]
+
+    q0, q1 = quaternions[idx], quaternions[idx + 1]
+    delta = quat_to_rotvec(quat_multiply(quat_conjugate(q0), q1))
+
+    h10 = s**3 - 2 * s**2 + s
+    h01 = -2 * s**3 + 3 * s**2
+    h11 = s**3 - s**2
+    rotvec = h10 * dt * rates[idx] + h01 * delta + h11 * dt * rates[idx + 1]
+    return quat_normalize(quat_multiply(q0, quat_from_rotvec(rotvec)))

@@ -317,6 +317,162 @@ def ray_ellipsoid_intersection(
     return np.where(hit[..., None], point, np.nan)
 
 
+def _rot_x(angle: np.ndarray) -> np.ndarray:
+    """Rotation about the x axis, shape ``(..., 3, 3)``."""
+    c, s = np.cos(angle), np.sin(angle)
+    zero, one = np.zeros_like(c), np.ones_like(c)
+    return np.stack(
+        [
+            np.stack([one, zero, zero], -1),
+            np.stack([zero, c, s], -1),
+            np.stack([zero, -s, c], -1),
+        ],
+        axis=-2,
+    )
+
+
+def _rot_y(angle: np.ndarray) -> np.ndarray:
+    """Rotation about the y axis, shape ``(..., 3, 3)``."""
+    c, s = np.cos(angle), np.sin(angle)
+    zero, one = np.zeros_like(c), np.ones_like(c)
+    return np.stack(
+        [
+            np.stack([c, zero, -s], -1),
+            np.stack([zero, one, zero], -1),
+            np.stack([s, zero, c], -1),
+        ],
+        axis=-2,
+    )
+
+
+def _rot_z(angle: np.ndarray) -> np.ndarray:
+    """Rotation about the z axis, shape ``(..., 3, 3)``."""
+    c, s = np.cos(angle), np.sin(angle)
+    zero, one = np.zeros_like(c), np.ones_like(c)
+    return np.stack(
+        [
+            np.stack([c, s, zero], -1),
+            np.stack([-s, c, zero], -1),
+            np.stack([zero, zero, one], -1),
+        ],
+        axis=-2,
+    )
+
+
+ARCSEC = np.pi / (180.0 * 3600.0)
+"""One arcsecond in radians."""
+
+J2000_UNIX = 946728000.0
+"""Unix epoch seconds of J2000.0 (2000-01-01T12:00:00 TT, near enough)."""
+
+
+def _julian_centuries(t: np.ndarray) -> np.ndarray:
+    """Julian centuries since J2000.0."""
+    return (t - J2000_UNIX) / (86400.0 * 36525.0)
+
+
+def _precession_matrix(tc: np.ndarray) -> np.ndarray:
+    """IAU-76 precession: J2000 mean equator/equinox to mean-of-date.
+
+    **This is not a small correction.** Precession accumulates at about 50
+    arcseconds per year, so a quarter-century after J2000 it is of order a third
+    of a degree — which at orbital radius is **tens of kilometres** on the ground.
+    Neglecting it, as a first pass at this model did, displaces the footprint by
+    roughly 40 km: an error large enough to matter and small enough to look like a
+    plausible platform bias, which is the worst combination.
+    """
+    zeta = (2306.2181 * tc + 0.30188 * tc**2 + 0.017998 * tc**3) * ARCSEC
+    theta = (2004.3109 * tc - 0.42665 * tc**2 - 0.041833 * tc**3) * ARCSEC
+    z = (2306.2181 * tc + 1.09468 * tc**2 + 0.018203 * tc**3) * ARCSEC
+    return _rot_z(-z) @ _rot_y(theta) @ _rot_z(-zeta)
+
+
+def _mean_obliquity(tc: np.ndarray) -> np.ndarray:
+    """Mean obliquity of the ecliptic, radians (IAU-76)."""
+    return (
+        84381.448 - 46.8150 * tc - 0.00059 * tc**2 + 0.001813 * tc**3
+    ) * ARCSEC
+
+
+def _nutation_angles(tc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Nutation in longitude and obliquity, radians (IAU-80, leading terms).
+
+    Nutation is a ~17 arcsecond wobble — about 500 m at orbital radius. That is
+    well below the geolocation error this level carries anyway (§3.2 of the
+    spec), so only the dominant terms are kept: the full 106-term series would
+    buy metres against an error budget measured in kilometres.
+    """
+    omega = np.radians(125.04452 - 1934.136261 * tc)  # Moon's ascending node
+    lsun = np.radians(280.4665 + 36000.7698 * tc)  # mean longitude of the Sun
+    lmoon = np.radians(218.3165 + 481267.8813 * tc)  # mean longitude of the Moon
+
+    d_psi = (
+        -17.20 * np.sin(omega)
+        - 1.32 * np.sin(2 * lsun)
+        - 0.23 * np.sin(2 * lmoon)
+        + 0.21 * np.sin(2 * omega)
+    ) * ARCSEC
+    d_eps = (
+        9.20 * np.cos(omega)
+        + 0.57 * np.cos(2 * lsun)
+        + 0.10 * np.cos(2 * lmoon)
+        - 0.09 * np.cos(2 * omega)
+    ) * ARCSEC
+    return d_psi, d_eps
+
+
+def _gmst(t: np.ndarray, tc: np.ndarray) -> np.ndarray:
+    """Greenwich Mean Sidereal Time, radians."""
+    gmst_s = (
+        67310.54841
+        + (876600.0 * 3600.0 + 8640184.812866) * tc
+        + 0.093104 * tc**2
+        - 6.2e-6 * tc**3
+    )
+    return np.radians((gmst_s % 86400.0) / 240.0)  # 240 s of time = 1 degree
+
+
+def eci_to_ecef_matrix(t: np.ndarray) -> np.ndarray:
+    """Rotation from the J2000 inertial frame to ECEF.
+
+    The full chain — **precession, nutation, then Earth rotation**::
+
+        ECEF  <--  R_z(GAST)  <--  nutation  <--  precession  <--  J2000
+
+    Earth rotation alone is not enough, and the gap is not academic. Between J2000
+    and the present, precession has turned the celestial reference frame by a
+    third of a degree; skipping it puts the platform tens of kilometres from where
+    it was. Polar motion (a few metres) is neglected, and the nutation series is
+    truncated to its leading terms (a few hundred metres) — both are far below the
+    kilometre-scale geolocation error this level carries without a GNSS lock, so
+    refining them would be false precision.
+
+    Parameters
+    ----------
+    t:
+        Times, shape ``(m,)``, seconds (Unix epoch). Treated as UT1 ≈ UTC; the
+        difference is under a second, i.e. metres of Earth rotation.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape ``(m, 3, 3)``.
+    """
+    t = np.atleast_1d(np.asarray(t, dtype=np.float64))
+    tc = _julian_centuries(t)
+
+    precession = _precession_matrix(tc)
+
+    eps0 = _mean_obliquity(tc)
+    d_psi, d_eps = _nutation_angles(tc)
+    nutation = _rot_x(-(eps0 + d_eps)) @ _rot_z(-d_psi) @ _rot_x(eps0)
+
+    # Apparent sidereal time: mean, plus the equation of the equinoxes.
+    gast = _gmst(t, tc) + d_psi * np.cos(eps0)
+
+    return _rot_z(gast) @ nutation @ precession
+
+
 def ecef_to_geodetic(points: np.ndarray) -> np.ndarray:
     """Convert ECEF coordinates to geodetic longitude, latitude and height.
 

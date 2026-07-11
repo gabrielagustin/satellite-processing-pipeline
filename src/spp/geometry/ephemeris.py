@@ -5,16 +5,26 @@ few samples per second — while the sensor model needs the state at the exact
 instant every raster line was exposed. This module holds the sampled states and
 interpolates them.
 
-Both interpolators are **rate-aware**: the telemetry delivers velocity alongside
-position, and angular rates alongside attitude, so the derivatives are known at
-the sample points and cubic Hermite interpolation is available for free. Using
-it is not a refinement for its own sake — at a few hertz, attitude changes by a
-fraction of a degree between samples, which is hundreds of metres on the ground
-(see ``docs/l1c_spec.md``, error budget).
+The telemetry delivers derivatives alongside the states — velocity with position,
+angular rates with attitude — which makes cubic Hermite interpolation available
+for free, and at a few hertz that accuracy is worth having.
+
+**But a derivative is only useful if it is the derivative of the thing you are
+interpolating**, and that must be *checked*, not assumed. The position and its
+velocity agree, so position is interpolated with Hermite. The attitude and its
+angular rates do **not** agree in the reference acquisition — the rates are ~55x
+larger than the quaternion sequence's own rotation — so attitude falls back to
+SLERP, automatically and with a warning (see :attr:`Attitude.rates_are_consistent`).
+
+Feeding Hermite a slope that is 55x too steep does not degrade the result a
+little; it overshoots between every pair of samples. On the reference acquisition
+it made the band-to-band error **seven times worse** (18 m to 123 m) — a
+"refinement" that quietly wrecked the model. Hence the check.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -26,6 +36,8 @@ from spp.geometry.frames import (
     quat_normalize,
     quat_to_rotvec,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _hermite_basis(s: np.ndarray) -> tuple[np.ndarray, ...]:
@@ -161,6 +173,41 @@ class Attitude:
         _validate_history(self.times, arrays, "Attitude")
         object.__setattr__(self, "quaternions", quat_normalize(self.quaternions))
 
+    @property
+    def rates_are_consistent(self) -> bool:
+        """Whether the delivered angular rates are the derivative of the quaternions.
+
+        They need not be, and in the reference acquisition they are **not**: the
+        delivered rates are ~55x larger than the rotation the quaternion sequence
+        actually undergoes between samples. They evidently describe the body's
+        motion in some other frame (an inertial one, most likely, which for an
+        Earth-pointing platform is dominated by the orbital rate) rather than the
+        drift of the small attitude offset the quaternions encode.
+
+        This is not a defect in the data, it is an unstated convention — but it is
+        a trap. Rate-aware interpolation uses the rates as the endpoint slopes of
+        the quaternion curve. Feed it slopes that are 55x too steep and it does not
+        degrade gracefully; it overshoots violently between every pair of samples.
+        On the reference acquisition that inflated the band-to-band error from 18 m
+        to 123 m — a model made worse by a "refinement".
+
+        So the rates are **checked, not trusted**. When they disagree with the
+        quaternion sequence, interpolation silently falls back to SLERP, which
+        needs no derivative and cannot be misled by a wrong one.
+        """
+        if self.rates is None:
+            return False
+        implied = quat_to_rotvec(
+            quat_multiply(quat_conjugate(self.quaternions[:-1]), self.quaternions[1:])
+        ) / np.diff(self.times)[:, None]
+        delivered = 0.5 * (self.rates[:-1] + self.rates[1:])
+
+        implied_speed = np.linalg.norm(implied, axis=-1).mean()
+        delivered_speed = np.linalg.norm(delivered, axis=-1).mean()
+        if implied_speed < 1e-12:
+            return delivered_speed < 1e-9  # a static attitude needs a zero rate
+        return bool(0.5 <= delivered_speed / implied_speed <= 2.0)
+
     def covers(self, t: np.ndarray | float) -> bool:
         """Whether ``t`` lies within the sampled span (no extrapolation needed)."""
         t = np.asarray(t, dtype=np.float64)
@@ -176,7 +223,11 @@ class Attitude:
         rate_aware:
             Use the sampled angular rates as endpoint derivatives (cubic Hermite
             in rotation-vector space). Falls back to SLERP (Spherical Linear
-            intERPolation) when the rates are absent or when set to ``False``.
+            intERPolation) when the rates are absent, when set to ``False``, or —
+            crucially — when the delivered rates turn out **not** to be the
+            derivative of the delivered quaternions (see
+            :attr:`rates_are_consistent`). Asking for rate-awareness is a request,
+            not an instruction: the data gets a veto.
 
         Returns
         -------
@@ -187,8 +238,8 @@ class Attitude:
         -----
         Both paths reproduce the sampled quaternions **exactly** at the sample
         times. The rate-aware path additionally matches the sampled angular rate
-        at each node, which captures the curvature that SLERP's constant-rate
-        assumption discards.
+        at each node — which is an improvement only if that rate really is the
+        curve's slope, and a serious regression if it is not.
         """
         t = np.atleast_1d(np.asarray(t, dtype=np.float64))
         idx, dt, s = _segments(self.times, t)
@@ -201,7 +252,16 @@ class Attitude:
         # cover (q and -q are the same rotation), so no sign fix is needed here.
         delta = quat_to_rotvec(quat_multiply(quat_conjugate(q0), q1))
 
-        if not rate_aware or self.rates is None:
+        use_rates = rate_aware and self.rates is not None and self.rates_are_consistent
+        if rate_aware and self.rates is not None and not use_rates:
+            logger.warning(
+                "Attitude: the delivered angular rates are not the derivative of "
+                "the delivered quaternions, so they cannot be used as interpolation "
+                "slopes; falling back to SLERP. Using them would overshoot between "
+                "samples and make the model worse, not better."
+            )
+
+        if not use_rates:
             rotvec = s[:, None] * delta  # SLERP, expressed in the same algebra
         else:
             w0 = self.rates[idx]

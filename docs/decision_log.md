@@ -279,3 +279,77 @@ declared assumptions, flagged in the quality report.
 Reporting an unresolved axis as resolved would be manufacturing a result, and
 would be worse than the honest gap: a product that is silently mirrored is harder
 to catch than one that says it might be.
+
+---
+
+## 15. Check the telemetry's derivatives before using them
+
+**Context.** The platform telemetry delivers derivatives alongside the states —
+velocity with position, angular rates with attitude. Cubic Hermite interpolation
+can use them, and at a few hertz the accuracy is worth having, so
+[`l1c_spec.md`](l1c_spec.md) originally specified rate-aware interpolation for
+both on the grounds that "the rates are delivered, so using them is free".
+
+**What happened.** They are not free. The delivered angular rates are **~55x
+larger** than the rotation the quaternion sequence itself undergoes between
+samples: they describe the body's motion in some other frame, not the drift of the
+small attitude offset the quaternions encode. Used as Hermite endpoint slopes they
+inject rotation the attitude never contained, and the band-to-band error rose from
+**18 m to 123 m** — a "refinement" that made the model seven times worse and looked,
+until it was measured, like an irreducible platform bias.
+
+The failure mode is not the obvious one. A slope of merely the wrong *magnitude*
+largely cancels: the two Hermite endpoint weights sum to `s(2s-1)(s-1)`, which
+vanishes at the midpoint. The damage comes from a rate pointing along a **different
+axis**, which is exactly what is delivered.
+
+**Choice.** Do not add a flag; add a **check**. `Attitude.rates_are_consistent`
+compares the delivered rates against the rates implied by the quaternion sequence,
+and interpolation falls back to SLERP — automatically, with a warning — whenever
+they disagree. Asking for rate-awareness is a request, not an instruction: **the
+data gets a veto**, because the caller cannot know what a given payload contains.
+Position keeps Hermite: its velocity *does* agree with its positions, and the check
+passes.
+
+**Trade-offs.** SLERP discards curvature that a correct rate would capture, so a
+payload whose rates are honest is interpolated slightly less well than it could be
+— but only until the check passes, at which point Hermite is used. The cost is one
+cheap comparison per acquisition; the alternative is a silently wrong model.
+
+**Generalisation.** The same discipline caught the neglected precession
+(entry 16). An unvalidated assumption about the input does not announce itself: it
+presents as an irreducible error, and it will be attributed to the platform rather
+than to the model unless someone asks where the residual points.
+
+---
+
+## 16. Model Earth rotation with precession and nutation, not sidereal time alone
+
+**Context.** The sensor model must rotate the platform state from its inertial
+frame into an Earth-fixed one. The first implementation applied only the Greenwich
+Mean Sidereal Time angle, documenting the omission as "precession, nutation and
+polar motion are neglected — they are arcsecond-level effects, far below the
+pointing uncertainty that dominates this level's error budget".
+
+**What happened.** That justification was wrong by four orders of magnitude.
+Precession accumulates at ~50 arcseconds **per year**, so a quarter-century after
+J2000 it is a third of a degree — **tens of kilometres** at orbital radius, not
+arcseconds. It left a 32.8 km footprint error that was indistinguishable from the
+platform bias the spec predicted for a GNSS-less acquisition, and would have been
+absorbed into the "absolute refinement" stage as if it were real.
+
+It was caught by asking which *direction* the residual pointed. The offset was
+−33.9 km east and −16.5 km north; precession in right ascension over the elapsed
+26.2 years predicts −33.5 km, and in declination −16.2 km. Both matched to 2%.
+
+**Choice.** Implement the full IAU-76/FK5 chain: precession → nutation → apparent
+sidereal time. Footprint error fell from **32.8 km to 208 m**. Polar motion (metres)
+and the truncated nutation terms (hundreds of metres) are still neglected — but now
+that omission is *justified* rather than asserted, being far below the geolocation
+error the level carries without a GNSS lock.
+
+**Trade-offs.** ~60 lines of standard astrodynamics and a handful of magic
+polynomial coefficients, against a 150x reduction in geolocation error. No contest.
+The residual 208 m is model-versus-model agreement, not absolute accuracy: the
+delivered footprint was almost certainly derived from the same telemetry, so it
+validates the implementation, not the orbit.
