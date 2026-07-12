@@ -102,13 +102,20 @@ class GeolocWarper(Warper):
         self.resampling = resampling
         self.nodata = nodata
 
-    def warp(
+    def resample(
         self,
         source_path: Path,
         geoloc: GeolocationGrid,
         target: TargetGrid,
-        output_path: Path,
-    ) -> Path:
+    ) -> np.ndarray:
+        """Resample onto the target grid and **return the array**, writing nothing.
+
+        Exposed separately from :meth:`warp` because the product is a multi-band stack:
+        writing each band to its own file and then reading all of them back to build the
+        stack costs a compress, a decompress and two passes over 1.7 GB, for data that was
+        already in memory. On the reference acquisition that round trip was 42 s of a
+        187 s run.
+        """
         with rasterio.open(source_path) as src:
             if (src.height, src.width) != (geoloc.n_lines, geoloc.n_columns):
                 raise ValueError(
@@ -141,6 +148,32 @@ class GeolocWarper(Warper):
             num_threads=WARP_THREADS,
         )
 
+        valid = float(np.isfinite(destination).mean())
+        logger.info(
+            "      resampled %s (%.1f%% of the grid carries data)",
+            source_path.name,
+            100.0 * valid,
+        )
+        return destination
+
+    def warp(
+        self,
+        source_path: Path,
+        geoloc: GeolocationGrid,
+        target: TargetGrid,
+        output_path: Path,
+        *,
+        overviews: bool = True,
+    ) -> Path:
+        """Resample and write a single-band raster.
+
+        The array lives and dies inside this call. Returning it instead — to assemble the
+        stack from memory and skip a disk round trip — keeps the previous band's 1.15 GB
+        destination alive while the next one is allocated, and the process gets killed. The
+        round trip is cheaper than the memory.
+        """
+        destination = self.resample(source_path, geoloc, target)
+
         profile = {
             **COG_PROFILE,
             "height": target.height,
@@ -154,13 +187,6 @@ class GeolocWarper(Warper):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with rasterio.open(output_path, "w", **profile) as dst:
             dst.write(destination, 1)
-            dst.build_overviews([2, 4, 8, 16, 32], Resampling.average)
-
-        valid = float(np.isfinite(destination).mean())
-        logger.info(
-            "Warped %s -> %s (%.1f%% of the grid carries data)",
-            source_path.name,
-            output_path.name,
-            100.0 * valid,
-        )
+            if overviews:
+                dst.build_overviews([2, 4, 8, 16, 32], Resampling.average)
         return output_path

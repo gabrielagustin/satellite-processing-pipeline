@@ -35,7 +35,7 @@ from spp.geometry.terrain import DEMTerrain, EllipsoidTerrain, TerrainModel
 from spp.geometry.timing import LineTiming
 from spp.refine import absolute, drift, matcher, reference, relative, scene
 from spp.resample.grid import TargetGrid, native_gsd
-from spp.resample.warper import GeolocWarper
+from spp.resample.warper import COG_PROFILE, GeolocWarper
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,11 @@ class L1CPipeline:
         written to the calibration. Without it the bands will not fully co-register; see
         :mod:`spp.refine.scene`.
     stack:
-        Also write a single multi-band raster with every band on the common grid.
+        Write the multi-band product. This **is** the product.
+    per_band:
+        Also write one raster per band. They are redundant with the stack, and writing
+        them costs a compress and a set of overviews each — 4 bands were 23 s of a 187 s
+        run — so they are off by default.
     gsd_m:
         Output resolution. Defaults to the native sampling, rounded up.
     step:
@@ -165,6 +169,7 @@ class L1CPipeline:
         reference_search: tuple[tuple[float, float, float, float], object, Path] | None = None,
         scene_correct: bool = True,
         stack: bool = True,
+        per_band: bool = False,
         gsd_m: float | None = None,
         step: int = geoloc_grid.DEFAULT_STEP,
     ) -> None:
@@ -184,6 +189,7 @@ class L1CPipeline:
         self.reference_image: reference.ReferenceImage | None = None
         self.scene_correct = scene_correct
         self.stack = stack
+        self.per_band = per_band
         self.gsd_m = gsd_m
         self.step = step
 
@@ -311,14 +317,13 @@ class L1CPipeline:
             ),
         }
 
+        # The refinement is over; the reference patch is hundreds of megabytes and the
+        # resampling wants every byte it can get.
+        absolute.clear_cache()
+
         step.begin(f"Resample {len(bands)} band(s) onto that grid")
         warper = GeolocWarper()
-        products = {}
-        for band in bands:
-            logger.info("      warping %s", band)
-            products[band] = warper.warp(
-                paths[band], grids[band], target, output_dir / f"{band}.tif"
-            )
+        products = self._resample_and_write(warper, paths, bands, grids, target, output_dir)
 
         step.begin("Write the co-registered stack")
         stack_path = None
@@ -326,6 +331,13 @@ class L1CPipeline:
             stack_path = self._write_stack(products, target, output_dir)
         else:
             step.skip("single band, or disabled")
+
+        if not self.per_band:
+            # The per-band rasters are an intermediate the stack was built from. Keeping
+            # them by default doubles the output for a duplicate of the product.
+            for path in products.values():
+                path.unlink(missing_ok=True)
+            products = {band: stack_path for band in products} if stack_path else products
 
         qa["timings_s"] = {k: round(v, 1) for k, v in step.summary().items()}
 
@@ -615,6 +627,86 @@ class L1CPipeline:
                 if "coregistration_not_achieved" in qa["flags"]:
                     qa["flags"].remove("coregistration_not_achieved")
         return corrected
+
+    def _resample_and_write(
+        self,
+        warper: GeolocWarper,
+        paths: dict[str, Path],
+        bands: list[str],
+        grids: dict,
+        target: TargetGrid,
+        output_dir: Path,
+    ) -> dict[str, Path]:
+        """Resample every band and write it **straight into the stack**, from memory.
+
+        Each band is resampled, written to its own raster, and the stack is assembled from
+        those. Holding the stack open and writing each band into it as it comes off the
+        resampler would skip a compress, a decompress and two passes over 1.7 GB -- and it
+        was tried, and it produced a **stack that was entirely NaN**. Every band resampled
+        correctly (the log said 39% coverage), the file was 652 MB, and every pixel read
+        back as NoData.
+
+        The failure did not reproduce in isolation: the same open-stack, write-band-by-band,
+        band-interleaved pattern works at full scale in a test. Something about the
+        multithreaded resampling running against an open write-mode dataset defeats it, and
+        I could not pin down what.
+
+        **So it is not used.** This pipeline has already shipped one silently-empty stack.
+        An optimisation whose failure mode I cannot explain is not worth 40 seconds,
+        especially when the failure is invisible -- the file opens, it has the right size,
+        the right georeferencing, the right band names, and no data at all.
+
+        The saving that IS taken: the per-band rasters skip their overviews (they are an
+        intermediate, not a product) and are deleted unless asked for.
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # `warp` resamples and writes in one call, and the 1.15 GB destination dies with
+        # it. Returning the array instead -- to write the stack from memory and skip a disk
+        # round trip -- keeps the previous band's array alive while the next is allocated,
+        # and the process was killed. The round trip is cheaper than the memory.
+        products: dict[str, Path] = {}
+        for band in bands:
+            logger.info("      resampling %s", band)
+            products[band] = warper.warp(
+                paths[band],
+                grids[band],
+                target,
+                output_dir / f"{band}.tif",
+                overviews=self.per_band,
+            )
+        return products
+
+    def _write_band(
+        self,
+        array: np.ndarray,
+        band: str,
+        target: TargetGrid,
+        output_dir: Path,
+        *,
+        overviews: bool = True,
+    ) -> Path:
+        """A single-band raster.
+
+        Overviews are skipped unless the file is a product the user asked for: building
+        them on an intermediate costs ~4 s a band and nobody ever looks at them.
+        """
+        path = output_dir / f"{band}.tif"
+        profile = {
+            **COG_PROFILE,
+            "height": target.height,
+            "width": target.width,
+            "count": 1,
+            "dtype": "float32",
+            "crs": target.crs,
+            "transform": target.transform,
+            "nodata": float("nan"),
+        }
+        with rasterio.open(path, "w", **profile) as dst:
+            dst.write(array, 1)
+            if overviews:
+                dst.build_overviews([2, 4, 8, 16, 32], Resampling.average)
+        return path
 
     def _write_stack(self, products: dict, target: TargetGrid, output_dir: Path) -> Path:
         """One multi-band raster: every band on the same grid, co-registered.

@@ -68,6 +68,16 @@ metres during the refinement, so it is read once and kept.
 """
 
 
+def clear_cache() -> None:
+    """Drop the cached reference patch.
+
+    It is hundreds of megabytes and it is only needed while the pointing is being refined.
+    Holding it through the resampling — which already wants 1.15 GB for a destination and
+    0.5 GB for a source — is what pushed the process over and got it killed.
+    """
+    _PATCH_CACHE.clear()
+
+
 def _reference_patch(reference_path: str, xs: np.ndarray, ys: np.ndarray):
     """The reference over the footprint, at native resolution, read once and cached."""
     import rasterio
@@ -87,9 +97,12 @@ def _reference_patch(reference_path: str, xs: np.ndarray, ys: np.ndarray):
             transform=src.transform,
         ).round_offsets().round_lengths()
 
+        # float32, not float64: the reference is 16-bit integer reflectance, so the extra
+        # precision holds nothing. The patch is 4,290 x 12,115 px -- 416 MB in float64,
+        # 208 MB in float32 -- and it is alive at the same time as a 1.15 GB destination.
         patch = src.read(
             1, window=read_window, boundless=True, fill_value=0
-        ).astype(np.float64)
+        ).astype(np.float32)
         transform = src.window_transform(read_window)
         nodata = src.nodata
 
@@ -98,9 +111,10 @@ def _reference_patch(reference_path: str, xs: np.ndarray, ys: np.ndarray):
     patch[patch == 0] = np.nan  # reference tiles pad with zero outside their footprint
 
     logger.info(
-        "      reference patch read once: %d x %d px (cached for the refinement)",
+        "      reference patch read once: %d x %d px = %.0f MB (cached for the refinement)",
         patch.shape[1],
         patch.shape[0],
+        patch.nbytes / 1e6,
     )
     _PATCH_CACHE[reference_path] = (patch, transform)
     return patch, transform

@@ -90,6 +90,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "still estimated, but the bands will not fully co-register.",
     )
     parser.add_argument(
+        "--per-band",
+        action="store_true",
+        help="Also write one raster per band. Redundant with stack.tif, and it costs a "
+        "compress and a set of overviews each.",
+    )
+    parser.add_argument(
         "--no-stack",
         action="store_true",
         help="Do not write the multi-band stack.tif (per-band rasters only).",
@@ -223,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         reference_search=reference_search,
         scene_correct=not args.no_scene_correction,
         stack=not args.no_stack,
+        per_band=args.per_band,
         gsd_m=args.gsd,
         step=args.step,
     )

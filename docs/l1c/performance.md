@@ -57,6 +57,34 @@ refinement, so it is now read **once** and kept. That halved the stage.
 The lesson is the one the whole profile teaches: **a benchmark that disables the expensive
 parts measures a program you are not running.**
 
+### What was tried and reverted
+
+The per-band rasters are an intermediate — the stack is assembled from them and they are a
+duplicate of it. Writing the stack **directly from memory**, band by band as each comes off
+the resampler, would skip a compress, a decompress and two passes over 1.7 GB.
+
+It was tried. It produced a **stack that was entirely NaN**: every band resampled correctly
+(the log said 39% coverage), the file was 652 MB, it had the right georeferencing and the
+right band names, and every pixel read back as NoData. The failure does not reproduce in
+isolation — the same open-stack, band-interleaved, write-band-by-band pattern works at full
+scale in a test — and I could not pin down what defeats it.
+
+It is not used. This pipeline has already shipped one silently-empty stack, and an
+optimisation whose failure mode cannot be explained is not worth 40 seconds when the failure
+is invisible.
+
+A second attempt — having the resampler *return* the array instead of writing it — was
+killed by the operating system: the previous band's 1.15 GB destination stays alive while
+the next is allocated. **The disk round trip is cheaper than the memory.**
+
+What was kept: the per-band rasters skip their overviews (they are an intermediate, nobody
+looks at them) and are deleted unless `--per-band` is passed. And the cached reference patch
+— 416 MB, and 208 MB now that it is `float32` rather than `float64` for 16-bit integer data
+— is **freed before the resampling starts**, because holding it alongside a 1.15 GB
+destination is what got the process killed in the first place.
+
+**187 s → 144 s on a four-band run.**
+
 The remaining large win is *band-level parallelism* — the bands are independent — but the
 warp holds ~1.7 GB per band (see below), so four in flight would want 7 GB. That is a
 memory problem to fix first, not a speed problem to exploit.

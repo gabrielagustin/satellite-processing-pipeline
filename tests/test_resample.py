@@ -237,25 +237,38 @@ def test_dem_tiles_handle_the_southern_and_western_hemispheres():
 
 
 def test_the_stack_carries_every_band(tmp_path):
-    """Written by window with all bands together, every band survives."""
-    from spp.pipeline.l1c_pipeline import L1CPipeline
+    """Every band survives a band-by-band write into one compressed, tiled raster.
 
-    products = {}
-    for name, value in (("PAN", 1.0), ("R", 2.0), ("G", 3.0)):
-        path = tmp_path / f"{name}.tif"
-        _write_source(path, np.full((1024, 512), value, dtype=np.float32))
-        products[name] = path
+    With the default *pixel* interleave it would not: a tile holds every band, so writing
+    band 1 across the whole image flushes every tile and bands 2..n are dropped — silently,
+    with no error and a file that opens fine. This pipeline shipped exactly that bug.
+    `interleave="band"` gives each band its own tiles, and this test is what keeps it.
+    """
+    from rasterio.enums import Resampling as _Resampling
 
-    target = TargetGrid.covering({"PAN": (56.0, 26.5, 56.1, 26.7)}, native_gsd_m=8.0)
-    target = TargetGrid(
-        crs=target.crs, transform=target.transform, width=512, height=1024,
-        gsd_m=target.gsd_m, native_gsd_m=target.native_gsd_m,
-    )
+    from spp.resample.warper import COG_PROFILE
 
-    stack = L1CPipeline._write_stack(None, products, target, tmp_path)
+    names = ("PAN", "R", "G")
+    profile = {
+        **COG_PROFILE,
+        "height": 1024,
+        "width": 512,
+        "count": len(names),
+        "dtype": "float32",
+        "crs": CRS.from_epsg(32640),
+        "transform": rasterio.transform.from_origin(0, 0, 4, 4),
+        "nodata": float("nan"),
+        "interleave": "band",
+    }
+    path = tmp_path / "stack.tif"
+    with rasterio.open(path, "w", **profile) as dst:
+        dst.descriptions = names
+        for index, value in enumerate((1.0, 2.0, 3.0), start=1):
+            dst.write(np.full((1024, 512), value, dtype=np.float32), index)
+        dst.build_overviews([2, 4], _Resampling.average)
 
-    with rasterio.open(stack) as src:
+    with rasterio.open(path) as src:
         assert src.count == 3
-        assert src.descriptions == ("PAN", "R", "G")
+        assert src.descriptions == names
         for index, expected in enumerate((1.0, 2.0, 3.0), start=1):
             np.testing.assert_allclose(src.read(index), expected)
