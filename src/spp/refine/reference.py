@@ -61,7 +61,10 @@ class ReferenceImage:
     Attributes
     ----------
     path:
-        A virtual mosaic of the reference tiles, openable by GDAL.
+        A **local** raster of the reference over the footprint. It is fetched from the
+        remote tiles once and kept: reading it out of the virtual mosaic is a 104 MB
+        download taking 35 s, which is 19% of a whole pipeline run, repeated in full every
+        time.
     acquired:
         Date of the reference.
     days_from_target:
@@ -150,7 +153,21 @@ def find(
         return None
 
     cloud = sum(f["properties"].get("eo:cloud_cover", 0.0) for f in chosen) / len(chosen)
+
+    local = destination.with_suffix(".tif")
+    if local.exists():
+        logger.info("Reference orthoimage: reusing the cached local copy (%s)", local.name)
+        return ReferenceImage(
+            path=local,
+            acquired=date.fromisoformat(best_day),
+            days_from_target=days,
+            cloud_cover=cloud,
+            wavelength_nm=wavelength_nm,
+            n_tiles=len(hrefs),
+        )
+
     _write_vrt([f"/vsicurl/{h}" for h in hrefs], destination)
+    _materialise(destination, local, bounds)
 
     if days > 30:
         logger.warning(
@@ -168,7 +185,7 @@ def find(
         wavelength_nm,
     )
     return ReferenceImage(
-        path=destination,
+        path=local,
         acquired=date.fromisoformat(best_day),
         days_from_target=days,
         cloud_cover=cloud,
@@ -213,6 +230,58 @@ def _search(
     except Exception as error:  # noqa: BLE001 - any network failure is simply a miss
         logger.warning("Reference catalogue unreachable (%s); skipping.", error)
         return []
+
+
+def _materialise(vrt: Path, destination: Path, bounds: tuple[float, float, float, float]) -> None:
+    """Download the footprint's window once, and keep it.
+
+    The virtual mosaic points at **remote** Cloud-Optimized GeoTIFFs, and reading the
+    footprint out of it is a 104 MB download that takes **35 seconds** — 19% of an entire
+    pipeline run, repeated in full on every re-run, for bytes that never change.
+
+    So it is fetched once and written locally. A second run reads it from disk in about a
+    second. This is the single largest saving available in the level, and it is not a
+    clever one: it is noticing that the same file was being downloaded again and again.
+    """
+    import rasterio
+    from rasterio.crs import CRS
+    from rasterio.warp import transform_bounds
+    from rasterio.windows import from_bounds
+
+    logger.info("      fetching the reference over the footprint (once; then cached)...")
+    with rasterio.open(vrt) as src:
+        left, bottom, right, top = transform_bounds(
+            CRS.from_epsg(4326), src.crs, *bounds
+        )
+        pad = 2000.0  # metres: the model moves during refinement, and the strip is rotated
+        window = from_bounds(
+            left - pad, bottom - pad, right + pad, top + pad, transform=src.transform
+        ).round_offsets().round_lengths()
+
+        data = src.read(1, window=window, boundless=True, fill_value=0)
+        profile = {
+            "driver": "GTiff",
+            "height": data.shape[0],
+            "width": data.shape[1],
+            "count": 1,
+            "dtype": data.dtype,
+            "crs": src.crs,
+            "transform": src.window_transform(window),
+            "nodata": src.nodata,
+            "tiled": True,
+            "blockxsize": 512,
+            "blockysize": 512,
+            "compress": "zstd",
+            "zstd_level": 1,
+            "BIGTIFF": "IF_SAFER",
+        }
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(destination, "w", **profile) as dst:
+        dst.write(data, 1)
+    logger.info(
+        "      cached locally: %s (%d x %d px)", destination.name, data.shape[1], data.shape[0]
+    )
 
 
 def _write_vrt(sources: list[str], destination: Path) -> None:

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import warnings
 from datetime import date
@@ -148,6 +149,14 @@ def main(argv: list[str] | None = None) -> int:
     # L1B rasters are in sensor coordinates and carry no CRS *by design*. GDAL says so
     # on every open; it is not news, and it drowns the log.
     warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
+
+    # Remote Cloud-Optimized GeoTIFFs are read once (the elevation model, the reference
+    # orthoimage) and then cached locally. These make that one read as fast as it can be.
+    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    os.environ.setdefault("GDAL_HTTP_MULTIPLEX", "YES")
+    os.environ.setdefault("GDAL_HTTP_VERSION", "2")
+    os.environ.setdefault("VSI_CACHE", "TRUE")
+    os.environ.setdefault("GDAL_NUM_THREADS", "ALL_CPUS")
 
     package = _read_package(args.input)
     ancillary, session = package["ancillary"], package["session"]

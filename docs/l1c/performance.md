@@ -83,7 +83,32 @@ looks at them) and are deleted unless `--per-band` is passed. And the cached ref
 — is **freed before the resampling starts**, because holding it alongside a 1.15 GB
 destination is what got the process killed in the first place.
 
-**187 s → 144 s on a four-band run.**
+### And then the biggest saving of all, which was not clever
+
+The absolute correction was 36% of the run. Profiling *inside* it found that neither the
+sensor model (0.8 s to locate half a million points against the terrain) nor the coordinate
+transforms (0.05 s) were the cost.
+
+**34.7 seconds of it was downloading the same 104 MB of Sentinel-2, on every run.** The
+reference is a virtual mosaic over *remote* Cloud-Optimized GeoTIFFs, and reading the
+footprint out of it is a network fetch — 19% of an entire pipeline run, repeated in full
+every time, for bytes that never change.
+
+It is now fetched once and written to `cache/reference.tif`. A second run reads it from
+disk. Together with GDAL's HTTP tuning (multiplexing, HTTP/2, no directory listing) for the
+one fetch that does happen:
+
+| | |
+|---|---:|
+| Before | **181 s** |
+| Cold cache (fetches the reference) | **90 s** |
+| Warm cache | **60 s** |
+
+The absolute correction went from 66 s to **5 s** on a warm run. The lesson is not a
+technique — it is that a profile of the *stage* said "the absolute correction is slow", and
+only a profile *inside* it said "you are downloading the same file again and again."
+
+**181 s → 90 s cold, 60 s warm.**
 
 The remaining large win is *band-level parallelism* — the bands are independent — but the
 warp holds ~1.7 GB per band (see below), so four in flight would want 7 GB. That is a
