@@ -203,11 +203,12 @@ def estimate(
     if abs(np.linalg.det(jacobian)) < 1e-9:
         return _refused("the model is insensitive to a boresight rotation")
 
-    roll, pitch = np.linalg.solve(jacobian, -offset)
+    roll, pitch = np.linalg.solve(jacobian, offset)
 
     corrected = _with_boresight(model, roll=roll, pitch=pitch)
-    after_offset = _mean_ground(corrected, band, terrain, lat0) - base - (-offset)
-    after = float(np.linalg.norm(after_offset))
+    after = float(
+        np.linalg.norm(_mean_ground(corrected, band, terrain, lat0) - base - offset)
+    )
 
     along = float(offset[1])  # the strip runs north-south; the along-track component
     clock = along / ground_speed_m_s if ground_speed_m_s else float("nan")
@@ -478,7 +479,16 @@ def estimate_against_reference(
     if abs(np.linalg.det(jacobian)) < 1e-9:
         return _refused("the model is insensitive to a boresight rotation")
 
-    roll, pitch = np.linalg.solve(jacobian, -offset)
+    # The sign. The matcher's convention (pinned in `matcher`) is that ours[l, c] shows
+    # what theirs[l + dl, c + dc] shows -- so the model's error is MINUS the ground
+    # displacement of that lattice shift, not plus it. Solving with the wrong sign does
+    # not weaken the correction, it moves the model *along* the error and DOUBLES it:
+    # 919 m became 1,900 m, and the next (finer) stage could not see a shift that large,
+    # so it reported 14 m of noise and the loop declared success. Two bugs, each hiding
+    # the other.
+    #
+    # Which is why the sign is not merely derived here. It is CHECKED, below.
+    roll, pitch = np.linalg.solve(jacobian, offset)
     clock = float(offset[1]) / ground_speed_m_s if ground_speed_m_s else float("nan")
 
     logger.info(
@@ -592,10 +602,52 @@ def refine_against_reference(
             )
             break
 
-        corrections.append(correction)
-        current = _with_boresight(
+        candidate = _with_boresight(
             current, roll=correction.roll_rad, pitch=correction.pitch_rad
         )
+
+        # Re-measure at the SAME lattice. A correction that does not shrink the offset
+        # has not corrected anything, and one that *grows* it has the sign wrong -- which
+        # is exactly what happened, and which no amount of onward refinement would have
+        # revealed, because the next stage's finer lattice could no longer see an error
+        # that large. Every stage must now prove itself before it is kept.
+        check = estimate_against_reference(
+            candidate,
+            band,
+            image,
+            reference_path,
+            terrain,
+            ground_speed_m_s=ground_speed_m_s,
+            step=step,
+        )
+        if check.fitted and check.offset_before_m > correction.offset_before_m:
+            logger.error(
+                "Absolute geolocation, stage %d: the correction made it WORSE "
+                "(%.0f m -> %.0f m). Rejecting it and stopping. This is the signature of "
+                "a sign error, not of a hard scene.",
+                stage,
+                correction.offset_before_m,
+                check.offset_before_m,
+            )
+            break
+
+        corrections.append(correction)
+        current = candidate
+        logger.info(
+            "      stage %d (lattice %d px): %.0f m -> %.0f m",
+            stage,
+            step,
+            correction.offset_before_m,
+            check.offset_before_m if check.fitted else float("nan"),
+        )
+
+        if check.fitted and check.offset_before_m < tolerance_m:
+            logger.info(
+                "Absolute geolocation converged at stage %d: %.0f m remaining.",
+                stage,
+                check.offset_before_m,
+            )
+            break
 
         if correction.offset_before_m < tolerance_m:
             logger.info(
