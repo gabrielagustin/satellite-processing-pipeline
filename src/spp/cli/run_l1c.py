@@ -276,6 +276,13 @@ def _summarise(result) -> None:
               f"of {absolute_qa['equivalent_clock_offset_s']:+.3f} s.")
         print( "             They are not separable from one strip; pitch is a convention.")
 
+    drift_qa = qa.get("drift")
+    if drift_qa and drift_qa.get("fitted"):
+        print()
+        print("  along-track drift (a rigid boresight cannot remove this — it grows):")
+        print(f"       residual  {drift_qa['residual_before_m']:.0f} m -> "
+              f"{drift_qa['residual_after_m']:.0f} m   over {drift_qa['n_windows']} windows")
+
     scene_correction = qa.get("scene_correction", {})
     fitted_scene = [b for b, v in scene_correction.items() if isinstance(v, dict) and v.get("fitted")]
     if fitted_scene:

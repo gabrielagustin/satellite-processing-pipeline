@@ -32,7 +32,7 @@ from spp.geometry.frames import ecef_to_geodetic, eci_to_ecef_matrix
 from spp.geometry.sensor_model import Convention, SensorModel
 from spp.geometry.terrain import DEMTerrain, EllipsoidTerrain, TerrainModel
 from spp.geometry.timing import LineTiming
-from spp.refine import absolute, matcher, reference, relative, scene
+from spp.refine import absolute, drift, matcher, reference, relative, scene
 from spp.resample.grid import TargetGrid, native_gsd
 from spp.resample.warper import GeolocWarper
 
@@ -152,6 +152,7 @@ class L1CPipeline:
         self.refine = refine
         self.resolve_parities = resolve_parities
         self.correct_absolute = correct_absolute
+        self._drift_inputs: tuple[str, Path, str] | None = None
         self.band_wavelengths = band_wavelengths or {}
         self.reference_search = reference_search
         self.reference_image: reference.ReferenceImage | None = None
@@ -242,6 +243,12 @@ class L1CPipeline:
                 step=self.step,
             )
 
+        step.begin("Correct the along-track drift (product only, not the calibration)")
+        if self._drift_inputs is not None:
+            grids = self._correct_drift(model, grids, qa)
+        else:
+            step.skip("no reference orthoimage")
+
         step.begin("Correct this acquisition's attitude (product only, not the calibration)")
         if self.scene_correct and matches:
             grids = self._scene_correct(model, grids, matches, qa)
@@ -315,6 +322,8 @@ class L1CPipeline:
         if self.refine and self.reference_band in bands:
             plan.append(f"Self-calibrate the interior orientation against {self.reference_band}")
         plan.append(f"Build the geolocation grids (lattice step {self.step} px)")
+        if self.correct_absolute and isinstance(self.terrain, DEMTerrain):
+            plan.append("Correct the along-track drift (product only, not the calibration)")
         if self.scene_correct:
             plan.append("Correct this acquisition's attitude (product only, not the calibration)")
         plan.append("Choose the common map grid")
@@ -456,6 +465,13 @@ class L1CPipeline:
                 "convention, not a measurement."
             ),
         }
+        # The boresight is a rigid rotation: it removes a CONSTANT bias and, by
+        # construction, nothing else. Whatever varies along the strip -- a clock-rate
+        # error, an attitude drift -- survives it untouched and is invisible in the single
+        # number the correction reports. Keep the field so the drift stage can see it.
+        if correction.fitted and self.reference_image is not None and "orthoimage" in source:
+            self._drift_inputs = (band, paths[band], str(self.reference_image.path))
+
         if not correction.fitted:
             return
 
@@ -487,6 +503,47 @@ class L1CPipeline:
         position, velocity = self.ephemeris.interpolate(np.array([mid]))
         radius = float(np.linalg.norm(position[0]))
         return float(np.linalg.norm(velocity[0]) * 6_371_008.8 / radius)
+
+    def _correct_drift(self, model: SensorModel, grids: dict, qa: dict) -> dict:
+        """Remove the part of the geolocation error that GROWS along the strip.
+
+        A rigid boresight rotation cannot: it has two degrees of freedom and they are both
+        constants. Measured against the reference orthoimage, the residual on the reference
+        acquisition grows from 7 m at one end of the strip to 30 m at the other -- some
+        30 m over 79 km of travel, an along-track scale error of about 0.03%.
+
+        Applied to **every band identically**, because a clock or attitude drift moves the
+        whole product, not one band relative to another. And applied to the **product**,
+        never the calibration: it describes this pass on this day.
+        """
+        band, path, reference_path = self._drift_inputs
+        with rasterio.open(path) as src:
+            image = src.read(1)
+
+        lines, east, north = absolute.measure_field(
+            model, band, image, reference_path, self.terrain
+        )
+        correction = drift.estimate(
+            lines, east, north, n_lines=grids[band].n_lines
+        )
+        qa["drift"] = {
+            "n_windows": correction.n_windows,
+            "residual_before_m": round(correction.residual_before_m, 1),
+            "residual_after_m": round(correction.residual_after_m, 1),
+            "fitted": correction.fitted,
+            "reason": correction.reason,
+            "note": (
+                "A clock rate, an attitude drift, or both -- not separable from one strip. "
+                "Applied to this product only; never written to the calibration."
+            ),
+        }
+        if not correction.fitted:
+            return grids
+
+        return {
+            name: correction.apply(grid, lat0=float(np.nanmean(grid.lat)))
+            for name, grid in grids.items()
+        }
 
     def _scene_correct(
         self, model: SensorModel, grids: dict, matches: dict, qa: dict

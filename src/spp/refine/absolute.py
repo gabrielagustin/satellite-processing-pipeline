@@ -369,12 +369,10 @@ def estimate_against_reference(
     from rasterio.warp import transform as warp_transform
     from rasterio.windows import from_bounds
 
-    n_lines, n_columns = image.shape
-    lines = np.arange(0, n_lines, step, dtype=np.float64)
-    columns = np.arange(0, n_columns, step, dtype=np.float64)
+    ours = _decimate(image, step)
+    lines = (np.arange(ours.shape[0], dtype=np.float64) + 0.5) * step
+    columns = (np.arange(ours.shape[1], dtype=np.float64) + 0.5) * step
     mesh_l, mesh_c = np.meshgrid(lines, columns, indexing="ij")
-
-    ours = image[mesh_l.astype(int), mesh_c.astype(int)].astype(np.float64)
 
     ground = model.locate(band, mesh_l.ravel(), mesh_c.ravel(), terrain=terrain)
     lon = ground[:, 0]
@@ -515,6 +513,25 @@ def estimate_against_reference(
         peak=peak,
         fitted=True,
     )
+
+
+def _decimate(image: np.ndarray, step: int) -> np.ndarray:
+    """Decimate by averaging each block — never by point-sampling.
+
+    Taking every `step`-th pixel of a textured scene is not decimation, it is **aliasing**:
+    the high spatial frequencies fold back as noise, and a correlation between two aliased
+    images measures that noise as readily as it measures the shift.
+
+    It survives a large displacement (the peak still dominates) and it buries a small one.
+    That is exactly the regime the drift estimate lives in — a ~25 m trend under 50 m of
+    aliasing noise — and it is why the first drift fit recovered nothing.
+    """
+    rows = (image.shape[0] // step) * step
+    cols = (image.shape[1] // step) * step
+    block = image[:rows, :cols].astype(np.float64).reshape(
+        rows // step, step, cols // step, step
+    )
+    return np.nanmean(block, axis=(1, 3))
 
 
 def _bilinear_sample(
@@ -658,3 +675,89 @@ def refine_against_reference(
             break
 
     return current, corrections
+
+
+def measure_field(
+    model: SensorModel,
+    band: str,
+    image: np.ndarray,
+    reference_path: str,
+    terrain,
+    *,
+    step: int = 16,
+    window: int = 48,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The displacement from the reference, **per window**, not collapsed to one number.
+
+    The boresight correction reduces the field to a single rigid rotation, which is all a
+    rotation can express. Anything that *varies* along the strip — a clock-rate error, an
+    attitude drift — survives it untouched, and is invisible in the single number the
+    correction reports.
+
+    This returns the field itself, so the variation can be seen and modelled
+    (:mod:`spp.refine.drift`).
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(lines, east_m, north_m)`` — the raster line of each matched window, and the
+        product's ground displacement **from** the reference there, in metres.
+    """
+    import rasterio
+    from rasterio import Affine
+    from rasterio.crs import CRS
+    from rasterio.warp import transform as warp_transform
+    from rasterio.windows import from_bounds
+
+    ours = _decimate(image, step)
+    lattice_lines = (np.arange(ours.shape[0], dtype=np.float64) + 0.5) * step
+    lattice_columns = (np.arange(ours.shape[1], dtype=np.float64) + 0.5) * step
+    mesh_l, mesh_c = np.meshgrid(lattice_lines, lattice_columns, indexing="ij")
+
+    ground = model.locate(band, mesh_l.ravel(), mesh_c.ravel(), terrain=terrain)
+    lon, lat = ground[:, 0], ground[:, 1]
+    lat0 = float(np.nanmean(lat))
+
+    with rasterio.open(reference_path) as src:
+        xs, ys = warp_transform(CRS.from_epsg(4326), src.crs, lon.tolist(), lat.tolist())
+        xs, ys = np.asarray(xs), np.asarray(ys)
+        pad = 4.0 * abs(src.transform.a)
+        read_window = from_bounds(
+            xs.min() - pad, ys.min() - pad, xs.max() + pad, ys.max() + pad,
+            transform=src.transform,
+        ).round_offsets().round_lengths()
+        patch = src.read(1, window=read_window, boundless=True, fill_value=0).astype(np.float64)
+        patch_transform = src.window_transform(read_window)
+        nodata = src.nodata
+
+    if nodata is not None:
+        patch[patch == nodata] = np.nan
+    patch[patch == 0] = np.nan
+
+    theirs = _bilinear_sample(patch, patch_transform, xs, ys).reshape(mesh_l.shape)
+
+    stride = max(1, window // 2)
+    rows, easts, norths = [], [], []
+    for row in range(0, ours.shape[0] - window + 1, stride):
+        for col in range(0, ours.shape[1] - window + 1, stride):
+            a = ours[row : row + window, col : col + window]
+            b = theirs[row : row + window, col : col + window]
+            if not np.isfinite(b).all() or not has_texture(a) or not has_texture(b):
+                continue
+            d_line, d_column, peak = phase_correlate(b, a)
+            if peak < 0.02:
+                continue
+
+            centre = np.array([row + window // 2, col + window // 2])
+            # The model's error is MINUS the ground displacement of the lattice shift --
+            # the same sign that a single pass gets wrong and doubles (see the module
+            # docstring of `absolute`).
+            offset = -_lattice_to_ground(
+                model, band, terrain, centre, np.array([d_line, d_column]),
+                step=step, lat0=lat0,
+            )
+            rows.append(float(centre[0] * step))
+            easts.append(float(offset[0]))
+            norths.append(float(offset[1]))
+
+    return np.array(rows), np.array(easts), np.array(norths)
