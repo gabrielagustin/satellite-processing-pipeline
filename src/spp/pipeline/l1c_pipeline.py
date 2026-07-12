@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,20 +41,45 @@ logger = logging.getLogger(__name__)
 
 
 class _Stages:
-    """Announces each stage as it starts, and says plainly when one is skipped."""
+    """Announces each stage as it starts, times it, and says plainly when one is skipped.
+
+    The timing is not decoration. A profile of this pipeline found the resampling taking
+    93% of a run — but only of a run with every refinement stage disabled. Which stage
+    dominates depends on what is switched on, and the only way to know is to measure the
+    run you are actually doing.
+    """
 
     def __init__(self, plan: list[str]) -> None:
         self._plan = plan
         self._number = 0
+        self._started: float | None = None
+        self._title: str | None = None
+        self.timings: dict[str, float] = {}
 
     def begin(self, title: str) -> None:
+        self._close()
         if title not in self._plan:
             return
         self._number = self._plan.index(title) + 1
+        self._title = title
+        self._started = time.perf_counter()
         logger.info("[%d/%d] %s", self._number, len(self._plan), title)
 
     def skip(self, reason: str) -> None:
         logger.info("      skipped — %s", reason)
+
+    def _close(self) -> None:
+        if self._title is not None and self._started is not None:
+            elapsed = time.perf_counter() - self._started
+            self.timings[self._title] = elapsed
+            logger.info("      (%.1f s)", elapsed)
+        self._title = None
+        self._started = None
+
+    def summary(self) -> dict[str, float]:
+        """Seconds per stage, slowest first."""
+        self._close()
+        return dict(sorted(self.timings.items(), key=lambda kv: -kv[1]))
 
 
 RESOLVED_CONVENTION = Convention(
@@ -300,6 +326,8 @@ class L1CPipeline:
             stack_path = self._write_stack(products, target, output_dir)
         else:
             step.skip("single band, or disabled")
+
+        qa["timings_s"] = {k: round(v, 1) for k, v in step.summary().items()}
 
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "qa_report_l1c.json").write_text(json.dumps(qa, indent=2))

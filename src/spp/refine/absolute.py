@@ -54,6 +54,57 @@ logger = logging.getLogger(__name__)
 PERTURBATION_RAD = 1e-5
 """Step used to probe how the ground point responds to a boresight rotation."""
 
+_PATCH_CACHE: dict[str, tuple[np.ndarray, object]] = {}
+"""The reference image, read once.
+
+The reference is a virtual mosaic over *remote* Cloud-Optimized GeoTIFFs. Reading it is a
+network fetch of hundreds of megabytes. The coarse-to-fine refinement calls the estimator
+six times (three lattices, each re-measured to prove it improved), and every one of those
+was re-fetching the same pixels over the network. That, not the arithmetic, was the cost of
+the stage.
+
+The patch depends only on the footprint, and the footprint does not move by more than
+metres during the refinement, so it is read once and kept.
+"""
+
+
+def _reference_patch(reference_path: str, xs: np.ndarray, ys: np.ndarray):
+    """The reference over the footprint, at native resolution, read once and cached."""
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    cached = _PATCH_CACHE.get(reference_path)
+    if cached is not None:
+        return cached
+
+    with rasterio.open(reference_path) as src:
+        pad = 200.0 * abs(src.transform.a)  # generous: the model moves during refinement
+        read_window = from_bounds(
+            float(np.nanmin(xs)) - pad,
+            float(np.nanmin(ys)) - pad,
+            float(np.nanmax(xs)) + pad,
+            float(np.nanmax(ys)) + pad,
+            transform=src.transform,
+        ).round_offsets().round_lengths()
+
+        patch = src.read(
+            1, window=read_window, boundless=True, fill_value=0
+        ).astype(np.float64)
+        transform = src.window_transform(read_window)
+        nodata = src.nodata
+
+    if nodata is not None:
+        patch[patch == nodata] = np.nan
+    patch[patch == 0] = np.nan  # reference tiles pad with zero outside their footprint
+
+    logger.info(
+        "      reference patch read once: %d x %d px (cached for the refinement)",
+        patch.shape[1],
+        patch.shape[0],
+    )
+    _PATCH_CACHE[reference_path] = (patch, transform)
+    return patch, transform
+
 LAND_HEIGHT_M = 2.0
 """Orthometric height above which the terrain is called land."""
 
@@ -387,35 +438,15 @@ def estimate_against_reference(
     # coarser -- which is how this first ran, and why it never finished.
     with rasterio.open(reference_path) as src:
         xs, ys = warp_transform(CRS.from_epsg(4326), src.crs, lon.tolist(), lat.tolist())
-        xs = np.asarray(xs)
-        ys = np.asarray(ys)
+    xs, ys = np.asarray(xs), np.asarray(ys)
 
-        pad = 4.0 * abs(src.transform.a)
-        read_window = from_bounds(
-            float(np.nanmin(xs)) - pad,
-            float(np.nanmin(ys)) - pad,
-            float(np.nanmax(xs)) + pad,
-            float(np.nanmax(ys)) + pad,
-            transform=src.transform,
-        ).round_offsets().round_lengths()
+    # Read at NATIVE resolution, and only once (see `_reference_patch`). An earlier version
+    # decimated the reference and sampled it nearest-neighbour -- two quantisations
+    # stacked, which put a floor of tens of metres under a measurement whose whole purpose
+    # is to resolve tens of metres.
+    patch, patch_transform = _reference_patch(reference_path, xs, ys)
 
-        # At NATIVE resolution. An earlier version decimated the reference to save
-        # bandwidth, then sampled it with nearest-neighbour -- two quantisations stacked,
-        # which put a floor of tens of metres under a measurement whose whole purpose is
-        # to resolve tens of metres. The saving was imaginary anyway: only the footprint's
-        # window is read, and at 10 m that is some tens of megabytes.
-        patch = src.read(1, window=read_window, boundless=True, fill_value=0).astype(
-            np.float64
-        )
-        patch_transform = src.window_transform(read_window)
-        nodata = src.nodata
-
-    if nodata is not None:
-        patch[patch == nodata] = np.nan
-    patch[patch == 0] = np.nan  # reference tiles pad with zero outside their footprint
-
-    reference_flat = _bilinear_sample(patch, patch_transform, xs, ys)
-    theirs = reference_flat.reshape(mesh_l.shape)
+    theirs = _bilinear_sample(patch, patch_transform, xs, ys).reshape(mesh_l.shape)
     if np.isfinite(theirs).mean() < 0.2:
         return _refused("the reference orthoimage does not cover the footprint")
 
@@ -720,20 +751,9 @@ def measure_field(
 
     with rasterio.open(reference_path) as src:
         xs, ys = warp_transform(CRS.from_epsg(4326), src.crs, lon.tolist(), lat.tolist())
-        xs, ys = np.asarray(xs), np.asarray(ys)
-        pad = 4.0 * abs(src.transform.a)
-        read_window = from_bounds(
-            xs.min() - pad, ys.min() - pad, xs.max() + pad, ys.max() + pad,
-            transform=src.transform,
-        ).round_offsets().round_lengths()
-        patch = src.read(1, window=read_window, boundless=True, fill_value=0).astype(np.float64)
-        patch_transform = src.window_transform(read_window)
-        nodata = src.nodata
+    xs, ys = np.asarray(xs), np.asarray(ys)
 
-    if nodata is not None:
-        patch[patch == nodata] = np.nan
-    patch[patch == 0] = np.nan
-
+    patch, patch_transform = _reference_patch(reference_path, xs, ys)
     theirs = _bilinear_sample(patch, patch_transform, xs, ys).reshape(mesh_l.shape)
 
     stride = max(1, window // 2)

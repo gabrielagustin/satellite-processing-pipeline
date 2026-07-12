@@ -294,6 +294,14 @@ def _summarise(result) -> None:
             print(f"       {band:5s} band-to-band RMS {value['rms_before_px']:6.2f} -> "
                   f"{value['rms_after_px']:.2f} px")
 
+    timings = qa.get("timings_s", {})
+    if timings:
+        total = sum(timings.values())
+        print()
+        print(f"  where the time went ({total:.0f} s total):")
+        for title, seconds in list(timings.items())[:5]:
+            print(f"       {seconds:6.1f} s  ({100 * seconds / total:4.1f}%)  {title}")
+
     if qa["flags"]:
         print()
         print("  NOT ESTABLISHED BY THIS RUN:")

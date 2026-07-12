@@ -27,7 +27,35 @@ of the time — Deflate was costing 15 seconds a band for nothing at all, becaus
 floating-point predictor is what is doing the compressing, before the codec ever sees the
 data.
 
-**Per band: 50 s → 18 s. A full eight-band run: ~6.7 min → ~2.5 min.**
+**Per band: 50 s → 18 s.**
+
+### And then the profile moved
+
+Optimising the warp was right and it was **incomplete**, because the profile above was
+taken with every refinement stage switched off. With them on — which is how the pipeline
+actually runs — the picture is different:
+
+| Stage | Time (4 bands) |
+|---|---:|
+| **Absolute pointing correction** | **57 s** |
+| Resampling (4 bands) | ~56 s |
+| Geolocation grids (4 bands) | 14 s |
+| Self-calibration | 8 s |
+| Along-track drift | 4 s |
+| Telemetry parities | 2 s |
+
+The absolute correction now costs as much as the entire warp. It had never been profiled,
+because it had been disabled in the run that was.
+
+Most of that was **not arithmetic — it was the network**. The reference is a virtual mosaic
+over *remote* Cloud-Optimized GeoTIFFs, and the coarse-to-fine refinement calls the
+estimator six times (three lattices, each re-measured to prove it improved). Every one of
+those was re-fetching the same few hundred megabytes of Sentinel-2. The patch depends only
+on the footprint and the footprint does not move by more than metres during the
+refinement, so it is now read **once** and kept. That halved the stage.
+
+The lesson is the one the whole profile teaches: **a benchmark that disables the expensive
+parts measures a program you are not running.**
 
 The remaining large win is *band-level parallelism* — the bands are independent — but the
 warp holds ~1.7 GB per band (see below), so four in flight would want 7 GB. That is a
