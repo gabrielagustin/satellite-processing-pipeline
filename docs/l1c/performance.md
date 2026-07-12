@@ -5,9 +5,33 @@ machine as the L1B figures above.
 
 | Stage | Cost | Notes |
 |---|---|---|
-| Geolocation grid | **~3.5 s** per band | 513 × 3870 lattice at step 8; includes the terrain intersection at every node |
+| Geolocation grid | **~3.8 s** per band | 513 × 3870 lattice at step 8; includes the terrain intersection at every node (39% of that time) |
 | Lattice in memory | **32 MB** per band | `float64` longitude and latitude; `float32` would resolve longitude to only ~0.7 m |
-| Warp | **~44 s** per band | Bilinear, through the geolocation array |
+| Warp | **~14 s** per band | Bilinear, through the geolocation array — **was 46 s** |
+
+### Where the time actually went
+
+Profiled rather than guessed, because the answer was not where the interesting code is.
+**The warp was 93% of the per-band cost** (46.5 s of 50 s); the geolocation grid — every
+line of physics in this level — was 3.8 s. Two defaults were doing the damage, and neither
+involved a trade-off:
+
+| | before | after |
+|---|---:|---:|
+| Resampling (`reproject`) | 24.6 s, **one core** | **6.5 s**, ten cores |
+| Write + overviews | 20.4 s (Deflate + predictor) | **5.7 s** (Zstandard level 1) |
+
+GDAL's warper is single-threaded unless told otherwise, and it had not been told. And
+Zstandard produces a file the **same size** as Deflate (432 MB against 434 MB) in a quarter
+of the time — Deflate was costing 15 seconds a band for nothing at all, because the
+floating-point predictor is what is doing the compressing, before the codec ever sees the
+data.
+
+**Per band: 50 s → 18 s. A full eight-band run: ~6.7 min → ~2.5 min.**
+
+The remaining large win is *band-level parallelism* — the bands are independent — but the
+warp holds ~1.7 GB per band (see below), so four in flight would want 7 GB. That is a
+memory problem to fix first, not a speed problem to exploit.
 | Output raster | 9774 × 29403 px @ 4.0 m | 1.15 GB uncompressed, **435 MB** on disk (Deflate + floating-point predictor) |
 | Elevation model | remote, cacheable | Copernicus GLO-30 over `/vsicurl`, no authentication; ~40% of the strip is open water |
 

@@ -619,7 +619,8 @@ class L1CPipeline:
             "tiled": True,
             "blockxsize": 512,
             "blockysize": 512,
-            "compress": "deflate",
+            "compress": "zstd",
+            "zstd_level": 1,
             "predictor": 3,
             "BIGTIFF": "IF_SAFER",
         }
