@@ -931,7 +931,7 @@ between them.
 | **2** ✅ | DEM + geoid + iterative terrain intersection | ~~Intersection converges~~ → **100%**, within 2 iterations. Geoid undulation −32.3 to −24.6 m, with a guard against PROJ's silent zero. Stereo coefficient 0.01524 measured vs 0.0152 predicted. The DEM improves model-vs-imagery band agreement by **2.5 px over mountains** and **0.0 px over water** — acting only where terrain exists, which is the signature of a correct correction |
 | **3** ⚠️ | Geolocation grid + warp → **first L1C products** (model-only) | Machinery **done and validated**: geolocation-grid interpolation error **0.026 px** (budget 0.1), 100% of nodes locate, products written to a UTM grid at 4.0 m. But the stated exit criterion — the band residual falls — **failed**: 30.2 m before, 33.2 m after. See §14.1 |
 | **4** ⚠️ | Relative refinement — self-calibrated per-band LoS (§8.2) | **Partial.** Five of seven bands self-calibrate, systematic residual driven to **~0.005 px**. Two are **refused** by the guardrail, correctly — see §14.2 |
-| **5** | Absolute refinement vs reference orthoimage (§8.1) | Absolute root-mean-square error reported against held-out check points |
+| **5** ✅ | Absolute refinement vs reference orthoimage (§8.1) | **919 m → 19 m** (elevation-model coastline) / **29 m** (Sentinel-2, same day). Corrected in the boresight, coarse-to-fine, with every stage re-measured and rejected if it did not improve. The along-track part remains degenerate with a clock offset (+0.126 s) and that is reported, not hidden |
 | **6** | Geometric QA report, STAC item, quicklook, tests, docs | QA schema complete; `spp-l1c` documented end-to-end |
 
 ### 14.1 Phase 3 failed its exit criterion, and the phasing was wrong
@@ -977,6 +977,26 @@ The corrected sequence:
 Had the exit criterion been written as "the products are produced", Phase 3 would
 have passed, and the missing co-registration would have been discovered — or not —
 somewhere much further downstream.
+
+---
+
+### 14.3 Two conventions the geometry could not see, and one that a user did
+
+Phase 0 reported the scan direction and the detector column sign as **unresolved** —
+mirrors that leave every geometric probe bit-identical. They were carried as *declared
+assumptions*, flagged in the quality report. That was honest.
+
+**It was not sufficient.** One of them was wrong, and the product was mirrored. Every
+geometric check passed. It was found by a user overlaying the product on a basemap.
+
+They are now resolved against the **terrain**: water is near-black in the near infrared,
+so a correct parity makes bright coincide with high ground and a mirrored one
+*anti-correlates* (Matthews +0.86 against +0.62 for the mirror, and −0.69 for the scan
+flip). See [`findings.md`](findings.md) §7.
+
+The lesson generalises to the whole phasing: **an assumption you have declared is still an
+assumption.** Ship a way to *look* at the product, and read the flags as work remaining
+rather than as absolution.
 
 ---
 

@@ -38,37 +38,69 @@ corrections in separate places is the only thing that distinguishes a co-registe
 from a corrupted instrument model.
 
 **Measured in the delivered `stack.tif`** (bands against PAN, 4.0 m pixels):
+R 2.3 px, G 2.0 px, B 2.8 px median — against ~8 px in the delivered L1B.
 
-| Band | Median | 90th percentile |
-|---|---:|---:|
-| G | 1.87 px | 3.15 px |
-| R | 2.28 px | 3.42 px |
-| B | 2.80 px | 4.72 px |
+**The residual is real, and it is not correctable by any displacement field.** Three
+measurements say so, and they rule out the obvious explanations:
 
-Against ~8 px in the delivered L1B, and ~8.3 px in L1C without any calibration. So the
-bands **are co-registered to 2–3 px, and are not co-registered to the sub-pixel target**.
-The floor is attitude jitter (~0.005° root-mean-square about a smooth fit, about 9 px on
-the ground) plus matching scatter, and neither a constant offset nor a smooth polynomial
-removes it.
+- It does **not shrink with window size** (128 → 1024 px leaves it at 2.0–2.9 px), so it
+  is not matching noise. Averaging over 64× the area would have hidden noise; it does not
+  move.
+- A **dense two-dimensional displacement field does not beat a degree-3 polynomial** on
+  held-out windows, so it is not a smooth spatial function.
+- Fitting a **per-line profile and testing it on withheld columns makes it worse** for
+  some bands (2.89 → 3.83 px). A dense fit is fitting noise.
 
-**Next step for the last few pixels.** Estimate the attitude itself — a filtered or
-smoothed attitude, or a per-line correction driven by dense matching — rather than
-absorbing its effect into a per-band displacement field.
+A geometric error from attitude would be **spatially coherent** — the attitude is common
+across the swath at any instant. This residual is not. What varies rapidly in both line
+and column, and is stable in time, is **the scene itself**: phase correlation between two
+*spectrally different* bands finds the shift that best aligns their gradients, and two
+bands genuinely see different edges. A large part of the measured "misregistration" is
+therefore **spectral, not geometric**, and no resampling corrects it because it is not a
+position error.
 
-### Absolute accuracy is unvalidated
+**Two things that look like defects and are not:**
 
-The model reproduces the delivered footprint to 208 m — but that footprint was almost
-certainly derived by the provider from the **same telemetry** the model consumes, so the
-agreement validates the implementation and says nothing about the orbit. Nothing in the
-package is independent of the ephemeris it would have to check.
+- **Ships appear displaced between bands.** They are. The bands image the same ground up
+  to 0.78 s apart, and a vessel at 10 m/s moves 8 m — two pixels — in that time. The
+  product is rendering real motion.
+- **Water rendering as magenta in a red-green-blue composite** is a display stretch, not
+  the data. With a per-band 2–98% stretch the water is the blue-cyan it should be.
 
-The acquisition also has **no satellite-navigation lock**: its positions are propagated,
-not measured.
+**Open question, and the test that settles it.** How much of the 2–3 px is geometry and
+how much is spectral? Measure the residual over spectrally *flat* terrain (bare desert)
+against spectrally *varied* terrain (vegetation, urban). If it collapses over the desert
+it is spectral, and there is nothing to correct.
 
-**Next step.** Match against an external reference orthoimage
-([`l1c_spec.md`](spec.md) §8.1). Until then the product carries the
-`absolute_accuracy_unvalidated` flag, and any absolute figure quoted from it would be
-false precision.
+### Absolute accuracy: corrected to ~20 m, against an external reference
+
+The acquisition has **no satellite-navigation lock** — its positions are propagated, not
+measured — and the resulting pointing bias was **919 m**, almost entirely along-track.
+Nothing internal to the level could see it: the bands are co-registered onto *each other*,
+and the delivered footprint was derived by the provider from the *same telemetry* the
+model consumes. A bias shared by the whole product is invisible to both.
+
+It is now corrected against a **reference orthoimage** (searched by catalogue, ranked by
+closeness in time; for the reference acquisition, a same-day scene at 0.9% cloud), with
+the correction applied to the **boresight** rather than as a shift of the output image.
+
+Verified against two references that share no code path with the estimator:
+
+| | |
+|---|---:|
+| uncorrected | 919 m |
+| corrected — elevation-model coastline | **19 m** |
+| corrected — Sentinel-2, same day | **29 m** |
+
+**Two caveats that are not rounding errors.**
+
+The reference's *own* absolute accuracy is specified at ~11 m. We are measuring against
+it, so its error is inside ours. At ~20 m we are within a factor of two of the ruler's own
+precision, and pressing further without a better reference would be false precision.
+
+And the along-track correction is **degenerate with a clock offset** (+0.126 s here). From
+a single strip the two are not separable. Attributing it to pitch is a **convention**, not
+a measurement, and the quality report says so.
 
 ### Two telemetry conventions are assumed, not resolved
 

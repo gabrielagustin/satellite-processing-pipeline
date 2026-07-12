@@ -1,10 +1,10 @@
 # L1C — What Measurement Overturned
 
 The design of the geometric level is in [`l1c_spec.md`](spec.md). This document
-is about how it got there, and it exists because the honest answer is: **seven of its
-load-bearing assumptions were wrong.** Measurement found six of them. The seventh was
-found by a user opening the product in a geographic information system and seeing that it
-did not line up.
+is about how it got there, and it exists because the honest answer is: **eight of its
+load-bearing assumptions were wrong.** Measurement found six of them. Two were found by a
+user opening the product in a geographic information system and seeing that it did not
+line up — after my own checks had certified it correct.
 
 None of the six announced itself. Each produced a plausible product, a finite
 number, a model that converged. Four of them looked exactly like an *irreducible
@@ -269,6 +269,78 @@ at the picture.
 
 Two things follow. Ship a way to *look* at the product, and read the flags as work
 remaining rather than as absolution.
+
+---
+
+## 8. I audited a broken ruler with itself. Twice.
+
+The absolute geolocation is corrected by matching the product against a reference
+orthoimage and turning the measured displacement into a boresight correction. It
+reported success. I verified it and reported 24 m, then 6 m. The user, overlaying the
+product on a basemap, kept measuring **two kilometres**.
+
+The user was right both times.
+
+### The sign was inverted
+
+The matcher's convention is that `ours[l, c]` shows what `theirs[l + dl, c + dc]` shows,
+so the model's error is **minus** the ground displacement of that lattice shift — not
+plus it. The solve used `-offset`.
+
+A sign error here does not weaken the correction. It moves the model **along** the error
+and doubles it: **919 m became ~1,990 m**, worse than doing nothing at all.
+
+### And a second bug hid the first
+
+The coarse-to-fine loop measured each result at a *finer* lattice than the one that
+produced it. Phase correlation can only see a shift that is small compared to its window;
+with the error now doubled to ~1,900 m, a 60 m lattice spans it in 32 cells inside a
+64-cell window — half the window — and the correlation collapses and returns noise. It
+returned **"14 m"**, the loop declared convergence, and the run reported success.
+
+Two bugs, each perfectly concealing the other.
+
+### But the real failure was mine, and it was the verification
+
+My verification script correlated the product against **the same reference** with **the
+same matcher** the estimator used. A sign error cancels in that comparison and measures
+zero. The check could not have failed. It could only have agreed.
+
+And I had already been caught doing exactly this, hours earlier, with the wavelength
+mismatch: the estimator requested an 842 nm reference while matching a 665 nm band, and
+my verification made the same substitution, so it certified a number that was measuring
+nothing.
+
+**Twice, in one session, I built a check out of the thing it was supposed to check.**
+
+### What settled it
+
+A reference that shares **no code path** with the estimator: the elevation model's
+coastline — a different source, a different sampling, a different band. It said 1,990 m.
+The orthoimage said the same once measured honestly. So did the user's eyes.
+
+| | |
+|---|---:|
+| uncorrected | 919 m |
+| with the sign bug | **~1,990 m** |
+| corrected | **19 m** (elevation-model coastline) |
+| corrected | **29 m** (Sentinel-2, same day) |
+
+### Changed
+
+The sign, and — more importantly — **every stage of the refinement now re-measures at the
+lattice that produced it, and is rejected if the offset grew.** A correction that cannot
+prove it improved is not kept. That check would have caught the sign error on the first
+run.
+
+### The lesson, and it is the sharpest in this document
+
+Every finding above was caught by a check that *could* fail. This one survived two
+checks that *could not* — because both were built from the code they were testing.
+
+**A verification that shares the assumptions of the thing it verifies is not a
+verification. It is an echo.** Independence is not a nice property of a test; it is the
+only property that makes it a test.
 
 ---
 
