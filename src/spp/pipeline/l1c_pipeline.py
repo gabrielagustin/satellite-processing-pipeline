@@ -32,11 +32,29 @@ from spp.geometry.frames import ecef_to_geodetic, eci_to_ecef_matrix
 from spp.geometry.sensor_model import Convention, SensorModel
 from spp.geometry.terrain import DEMTerrain, EllipsoidTerrain, TerrainModel
 from spp.geometry.timing import LineTiming
-from spp.refine import absolute, matcher, relative, scene
+from spp.refine import absolute, matcher, reference, relative, scene
 from spp.resample.grid import TargetGrid, native_gsd
 from spp.resample.warper import GeolocWarper
 
 logger = logging.getLogger(__name__)
+
+
+class _Stages:
+    """Announces each stage as it starts, and says plainly when one is skipped."""
+
+    def __init__(self, plan: list[str]) -> None:
+        self._plan = plan
+        self._number = 0
+
+    def begin(self, title: str) -> None:
+        if title not in self._plan:
+            return
+        self._number = self._plan.index(title) + 1
+        logger.info("[%d/%d] %s", self._number, len(self._plan), title)
+
+    def skip(self, reason: str) -> None:
+        logger.info("      skipped — %s", reason)
+
 
 RESOLVED_CONVENTION = Convention(
     ephemeris_frame="eci",
@@ -117,6 +135,8 @@ class L1CPipeline:
         refine: bool = True,
         resolve_parities: bool = True,
         correct_absolute: bool = True,
+        band_wavelengths: dict[str, float] | None = None,
+        reference_search: tuple[tuple[float, float, float, float], object, Path] | None = None,
         scene_correct: bool = True,
         stack: bool = True,
         gsd_m: float | None = None,
@@ -132,6 +152,9 @@ class L1CPipeline:
         self.refine = refine
         self.resolve_parities = resolve_parities
         self.correct_absolute = correct_absolute
+        self.band_wavelengths = band_wavelengths or {}
+        self.reference_search = reference_search
+        self.reference_image: reference.ReferenceImage | None = None
         self.scene_correct = scene_correct
         self.stack = stack
         self.gsd_m = gsd_m
@@ -153,6 +176,14 @@ class L1CPipeline:
                 "Run the L1B stage first (`spp-l1b`)."
             )
 
+        stages = self._stage_plan(bands)
+        logger.info("L1C: %d stage(s) over %d band(s) — %s", len(stages), len(bands), ", ".join(bands))
+        for number, title in enumerate(stages, start=1):
+            logger.info("   %d. %s", number, title)
+
+        step = _Stages(stages)
+
+        step.begin("Resolve the telemetry's mirrors against the terrain")
         convention = self.convention
         parity_report = None
         if self.resolve_parities and isinstance(self.terrain, DEMTerrain):
@@ -178,9 +209,13 @@ class L1CPipeline:
         if not (parity_report and parity_report.get("decisive")):
             qa["flags"].append("conventions_assumed")
 
+        step.begin("Correct the absolute pointing against an independent reference")
         if self.correct_absolute and isinstance(self.terrain, DEMTerrain):
             self._correct_absolute(paths, bands, qa)
+        else:
+            step.skip("no elevation model, or disabled")
 
+        step.begin(f"Self-calibrate the interior orientation against {self.reference_band}")
         model = self.model
         matches: dict[str, list] = {}
         if self.refine and self.reference_band in bands:
@@ -193,7 +228,7 @@ class L1CPipeline:
             )
             qa["flags"].append("coregistration_not_achieved")
 
-        logger.info("Building geolocation grids (lattice step %d)...", self.step)
+        step.begin(f"Build the geolocation grids (lattice step {self.step} px)")
         grids = {}
         with rasterio.open(paths[bands[0]]) as probe:
             n_lines, n_columns = probe.height, probe.width
@@ -207,9 +242,13 @@ class L1CPipeline:
                 step=self.step,
             )
 
+        step.begin("Correct this acquisition's attitude (product only, not the calibration)")
         if self.scene_correct and matches:
             grids = self._scene_correct(model, grids, matches, qa)
+        else:
+            step.skip("no matches, or disabled")
 
+        step.begin("Choose the common map grid")
         target = TargetGrid.covering(
             {b: g.bounds for b, g in grids.items()},
             native_gsd_m=self.native_gsd_m,
@@ -239,17 +278,21 @@ class L1CPipeline:
             ),
         }
 
+        step.begin(f"Resample {len(bands)} band(s) onto that grid")
         warper = GeolocWarper()
         products = {}
         for band in bands:
-            logger.info("Warping %s...", band)
+            logger.info("      warping %s", band)
             products[band] = warper.warp(
                 paths[band], grids[band], target, output_dir / f"{band}.tif"
             )
 
+        step.begin("Write the co-registered stack")
         stack_path = None
         if self.stack and len(products) > 1:
             stack_path = self._write_stack(products, target, output_dir)
+        else:
+            step.skip("single band, or disabled")
 
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "qa_report_l1c.json").write_text(json.dumps(qa, indent=2))
@@ -257,19 +300,75 @@ class L1CPipeline:
 
         return L1CResult(products=products, qa=qa, grid=target, stack=stack_path)
 
+    def _stage_plan(self, bands: list[str]) -> list[str]:
+        """What this run is going to do, announced before it does it.
+
+        A log that only says what has happened leaves the reader guessing how much is
+        left and which steps were skipped. Stating the plan first makes a skipped stage
+        visible as a *gap*, not as an absence nobody notices.
+        """
+        plan = []
+        if self.resolve_parities and isinstance(self.terrain, DEMTerrain):
+            plan.append("Resolve the telemetry's mirrors against the terrain")
+        if self.correct_absolute and isinstance(self.terrain, DEMTerrain):
+            plan.append("Correct the absolute pointing against an independent reference")
+        if self.refine and self.reference_band in bands:
+            plan.append(f"Self-calibrate the interior orientation against {self.reference_band}")
+        plan.append(f"Build the geolocation grids (lattice step {self.step} px)")
+        if self.scene_correct:
+            plan.append("Correct this acquisition's attitude (product only, not the calibration)")
+        plan.append("Choose the common map grid")
+        plan.append(f"Resample {len(bands)} band(s) onto that grid")
+        if self.stack and len(bands) > 1:
+            plan.append("Write the co-registered stack")
+        return plan
+
     def _resolve_parities(self, paths: dict[str, Path], bands: list[str]):
         """Settle the two mirrors that geometry cannot see, against the elevation model.
 
         Near-infrared is used when available: water is near-black in it, so the
         land/water contrast that carries the signal is strongest.
         """
-        band = next((b for b in ("NIR", "RE3", "RE2", "R") if b in bands), bands[0])
-        logger.info("Resolving the scan/column parities against the terrain (%s)...", band)
+        band = self._match_band(bands)
+        logger.info("      using band %s (water is darkest in the near infrared)", band)
         with rasterio.open(paths[band]) as src:
             image = src.read(1)
         return conventions.resolve_parities(
             self.camera, self.ephemeris, self.attitude, self.timing,
             band=band, image=image, terrain=self.terrain, base=self.convention,
+        )
+
+    def _match_band(self, bands: list[str]) -> str:
+        """The band used to match against an external reference.
+
+        Near-infrared first: water is near-black in it, so the land/water boundary is
+        sharp and vegetation gives texture.
+        """
+        return next((b for b in ("NIR", "RE3", "RE2", "R") if b in bands), bands[0])
+
+    def _find_reference(self, band: str) -> reference.ReferenceImage | None:
+        """Fetch a reference orthoimage **at this band's own wavelength**.
+
+        The wavelength is not a detail. Matching our 665 nm red against a reference's
+        842 nm near-infrared correlates two different pictures of the same ground: on the
+        reference acquisition it moved the measured bias from 919 m to 283 m and inflated
+        the window scatter from 1.6 lattice cells to 9.0. A confident, precise, wrong
+        answer -- which is why the reference is searched *after* the band is chosen, not
+        before.
+        """
+        if self.reference_search is None:
+            return None
+        bounds, acquired, destination = self.reference_search
+        wavelength = self.band_wavelengths.get(band)
+        if wavelength is None:
+            logger.warning(
+                "No central wavelength known for band %s; cannot match it to a reference "
+                "band. Falling back to the terrain's coastline.",
+                band,
+            )
+            return None
+        return reference.find(
+            bounds, acquired, destination, wavelength_nm=int(round(wavelength))
         )
 
     def _correct_absolute(self, paths: dict[str, Path], bands: list[str], qa: dict) -> None:
@@ -281,16 +380,51 @@ class L1CPipeline:
         from the same telemetry the model consumes. The terrain's coastline is the one
         reference in the run that the telemetry did not produce.
         """
-        band = next((b for b in ("NIR", "RE3", "RE2", "R") if b in bands), bands[0])
-        logger.info("Correcting absolute geolocation against the terrain (%s)...", band)
+        band = self._match_band(bands)
+        self.reference_image = self._find_reference(band)
+        logger.info("      matching band %s against the reference", band)
         with rasterio.open(paths[band]) as src:
             image = src.read(1)
 
         ground_speed = self._ground_speed()
-        correction = absolute.estimate(
-            self.model, band, image, self.terrain, ground_speed_m_s=ground_speed
-        )
+
+        # Prefer a reference orthoimage: it matches *texture*, and pins the product to a
+        # pixel. The terrain's coastline is a real reference too, and a coarse one -- it
+        # can only be as sharp as a shoreline is, which on the reference acquisition left
+        # a 58 m discrepancy against the orthoimage. Fall back to it, and say which was
+        # used, rather than quietly reporting one number for two different measurements.
+        correction = None
+        source = "terrain coastline"
+        if self.reference_image is not None:
+            correction = absolute.estimate_against_reference(
+                self.model,
+                band,
+                image,
+                str(self.reference_image.path),
+                self.terrain,
+                ground_speed_m_s=ground_speed,
+            )
+            if correction.fitted:
+                source = (
+                    f"reference orthoimage ({self.reference_image.acquired}, "
+                    f"{self.reference_image.days_from_target} day(s) away, "
+                    f"{self.reference_image.cloud_cover:.0f}% cloud)"
+                )
+            else:
+                logger.warning(
+                    "The reference orthoimage did not settle the geolocation (%s); "
+                    "falling back to the terrain's coastline.",
+                    correction.reason,
+                )
+                correction = None
+
+        if correction is None:
+            correction = absolute.estimate(
+                self.model, band, image, self.terrain, ground_speed_m_s=ground_speed
+            )
+
         qa["absolute"] = {
+            "reference": source,
             "offset_before_m": round(correction.offset_before_m, 1),
             "roll_urad": round(correction.roll_rad * 1e6, 1),
             "pitch_urad": round(correction.pitch_rad * 1e6, 1),
@@ -318,7 +452,13 @@ class L1CPipeline:
         # caveat with silence would be worse than the bias.
         if "absolute_accuracy_unvalidated" in qa["flags"]:
             qa["flags"].remove("absolute_accuracy_unvalidated")
-        qa["flags"].append("absolute_accuracy_terrain_only")
+
+        # Only the *weaker* outcome earns a caveat. Corrected against a reference
+        # orthoimage, the geolocation has been established, and listing it under "not
+        # established" would be the same mistake as burying it -- just in the other
+        # direction. The remaining degeneracy is reported with the measurement itself.
+        if "orthoimage" not in source:
+            qa["flags"].append("absolute_accuracy_terrain_only")
 
     def _ground_speed(self) -> float:
         """Speed of the sub-satellite point, from the ephemeris."""

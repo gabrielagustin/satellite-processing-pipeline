@@ -15,6 +15,7 @@ import json
 import logging
 import sys
 import warnings
+from datetime import date
 from pathlib import Path
 
 from rasterio.errors import NotGeoreferencedWarning
@@ -68,6 +69,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not resolve the scan/column mirrors against the terrain; use the "
         "defaults. Only sensible if the scene has no land/water contrast.",
+    )
+    parser.add_argument(
+        "--no-reference-image",
+        action="store_true",
+        help="Do not search for a reference orthoimage. Absolute geolocation then falls "
+        "back to the elevation model's coastline, which is coarser (tens of metres).",
     )
     parser.add_argument(
         "--no-absolute-correction",
@@ -180,6 +187,28 @@ def main(argv: list[str] | None = None) -> int:
             "NOT orthorectified. Relief will be displaced."
         )
 
+    # The reference is searched inside the pipeline, once it knows which band it will
+    # match -- so that our band and the reference's are the same WAVELENGTH.
+    reference_search = None
+    if not args.no_absolute_correction and not args.no_reference_image and terrain is not None:
+        reference_search = (
+            tuple(stac["bbox"]),
+            date.fromisoformat(stac["properties"]["datetime"][:10]),
+            args.output / "cache" / "reference.vrt",
+        )
+
+    # Central wavelength per band, from the imager configuration. It is what lets the
+    # reference image be requested in the SAME band as ours: matching a 665 nm red
+    # against a reference's 842 nm near-infrared correlates two different pictures of the
+    # same ground, and produces a confident, precise, wrong answer.
+    band_ids = {entry["name"]: int(entry["id"]) for entry in filters}
+    cwls = session["ImagerConfiguration"].get("BandCWL", [])
+    wavelengths = {
+        name: float(cwls[band_id])
+        for name, band_id in band_ids.items()
+        if band_id < len(cwls)
+    }
+
     pipeline = L1CPipeline(
         camera,
         ephemeris,
@@ -190,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
         refine=not args.no_refine,
         resolve_parities=not args.no_parity_check,
         correct_absolute=not args.no_absolute_correction,
+        band_wavelengths=wavelengths,
+        reference_search=reference_search,
         scene_correct=not args.no_scene_correction,
         stack=not args.no_stack,
         gsd_m=args.gsd,
@@ -235,8 +266,9 @@ def _summarise(result) -> None:
     absolute_qa = qa.get("absolute")
     if absolute_qa and absolute_qa.get("fitted"):
         print()
-        print("  absolute geolocation (against the terrain's coastline — the only")
-        print("  reference in this run the telemetry did not produce):")
+        print("  absolute geolocation — the only reference in this run the telemetry")
+        print("  did not produce:")
+        print(f"       reference       {absolute_qa.get('reference', '?')}")
         print(f"       offset before   {absolute_qa['offset_before_m']:.0f} m")
         print(f"       boresight       roll {absolute_qa['roll_urad']:+.0f} urad, "
               f"pitch {absolute_qa['pitch_urad']:+.0f} urad")

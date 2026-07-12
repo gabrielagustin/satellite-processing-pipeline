@@ -47,7 +47,7 @@ import numpy as np
 from spp.geometry.camera import Camera
 from spp.geometry.sensor_model import SensorModel
 from spp.geometry.terrain import DEMTerrain
-from spp.refine.matcher import phase_correlate
+from spp.refine.matcher import has_texture, phase_correlate
 
 logger = logging.getLogger(__name__)
 
@@ -312,4 +312,192 @@ def _refused(reason: str) -> AbsoluteCorrection:
         peak=0.0,
         fitted=False,
         reason=reason,
+    )
+
+
+# -- against a reference orthoimage ------------------------------------------
+
+
+def estimate_against_reference(
+    model: SensorModel,
+    band: str,
+    image: np.ndarray,
+    reference_path: str,
+    terrain,
+    *,
+    ground_speed_m_s: float,
+    step: int = 16,
+    window: int = 64,
+    min_matches: int = 10,
+) -> AbsoluteCorrection:
+    """Measure absolute displacement against an independently georeferenced image.
+
+    Sharper than the terrain's coastline by an order of magnitude, because it matches
+    *texture* rather than a binary land mask: a coastline pins you to how well a shoreline
+    is defined, an orthoimage pins you to a pixel.
+
+    The reference is sampled **at the ground points the model predicts**, on the sensor's
+    own lattice. No warp is needed, and no resampling of our data is done before the
+    measurement — which matters, because resampling is precisely what would smear the
+    displacement being measured.
+
+    Parameters
+    ----------
+    model:
+        The sensor model, with whatever calibration is in force.
+    band:
+        Band whose imagery is supplied.
+    image:
+        The band's raster, in sensor coordinates.
+    reference_path:
+        A georeferenced raster of the same ground (see :mod:`spp.refine.reference`).
+    terrain:
+        Elevation model, so the ground points are the orthorectified ones.
+    ground_speed_m_s:
+        Speed of the sub-satellite point, to report the equivalent clock offset.
+    step:
+        Lattice spacing in detector samples.
+    window:
+        Correlation window, in lattice cells.
+    min_matches:
+        Refuse to estimate on fewer textured windows than this.
+    """
+    import rasterio
+    from rasterio import Affine
+    from rasterio.crs import CRS
+    from rasterio.warp import transform as warp_transform
+    from rasterio.windows import from_bounds
+
+    n_lines, n_columns = image.shape
+    lines = np.arange(0, n_lines, step, dtype=np.float64)
+    columns = np.arange(0, n_columns, step, dtype=np.float64)
+    mesh_l, mesh_c = np.meshgrid(lines, columns, indexing="ij")
+
+    ours = image[mesh_l.astype(int), mesh_c.astype(int)].astype(np.float64)
+
+    ground = model.locate(band, mesh_l.ravel(), mesh_c.ravel(), terrain=terrain)
+    lon = ground[:, 0]
+    lat = ground[:, 1]
+    lat0 = float(np.nanmean(lat))
+
+    # Sample the reference where the model says each detector sample landed.
+    #
+    # Only the footprint's window is read, and only as finely as the lattice can use.
+    # Reading the whole mosaic at native resolution would pull hundreds of megabytes
+    # across the network to answer a question posed on a grid an order of magnitude
+    # coarser -- which is how this first ran, and why it never finished.
+    with rasterio.open(reference_path) as src:
+        xs, ys = warp_transform(CRS.from_epsg(4326), src.crs, lon.tolist(), lat.tolist())
+        xs = np.asarray(xs)
+        ys = np.asarray(ys)
+
+        pad = 4.0 * abs(src.transform.a)
+        read_window = from_bounds(
+            float(np.nanmin(xs)) - pad,
+            float(np.nanmin(ys)) - pad,
+            float(np.nanmax(xs)) + pad,
+            float(np.nanmax(ys)) + pad,
+            transform=src.transform,
+        ).round_offsets().round_lengths()
+
+        # The lattice samples the ground every `step` detector pixels; there is nothing
+        # to gain from reading the reference finer than that.
+        lattice_spacing_m = step * 3.8
+        decimation = max(1, int(lattice_spacing_m / abs(src.transform.a) / 2))
+        out_shape = (
+            max(1, int(read_window.height) // decimation),
+            max(1, int(read_window.width) // decimation),
+        )
+
+        patch = src.read(
+            1, window=read_window, out_shape=out_shape, boundless=True, fill_value=0
+        ).astype(np.float64)
+        patch_transform = src.window_transform(read_window) * Affine.scale(
+            int(read_window.width) / out_shape[1], int(read_window.height) / out_shape[0]
+        )
+        nodata = src.nodata
+
+    if nodata is not None:
+        patch[patch == nodata] = np.nan
+    patch[patch == 0] = np.nan  # reference tiles pad with zero outside their footprint
+
+    inverse = ~patch_transform
+    cols_f, rows_f = inverse * (xs, ys)
+    rows = np.floor(rows_f).astype(np.int64)
+    cols = np.floor(cols_f).astype(np.int64)
+
+    inside = (rows >= 0) & (rows < patch.shape[0]) & (cols >= 0) & (cols < patch.shape[1])
+    reference_flat = np.full(rows.shape, np.nan)
+    reference_flat[inside] = patch[rows[inside], cols[inside]]
+
+    theirs = reference_flat.reshape(mesh_l.shape)
+    if np.isfinite(theirs).mean() < 0.2:
+        return _refused("the reference orthoimage does not cover the footprint")
+
+    # Match window by window, so the result is a robust consensus rather than one
+    # correlation over a scene that is mostly featureless water.
+    shifts = []
+    for row in range(0, ours.shape[0] - window + 1, window):
+        for col in range(0, ours.shape[1] - window + 1, window):
+            a = ours[row : row + window, col : col + window]
+            b = theirs[row : row + window, col : col + window]
+            if not np.isfinite(b).all() or not has_texture(a) or not has_texture(b):
+                continue
+            d_line, d_column, peak = phase_correlate(b, a)
+            if peak < 0.02:
+                continue
+            shifts.append((d_line, d_column, peak))
+
+    if len(shifts) < min_matches:
+        return _refused(
+            f"only {len(shifts)} textured windows matched the reference (need "
+            f"{min_matches}); the scene may be mostly water or cloud"
+        )
+
+    shift_array = np.array([[s[0], s[1]] for s in shifts])
+    consensus = np.median(shift_array, axis=0)
+    scatter = float(np.median(np.abs(shift_array - consensus)) * 1.4826)
+    peak = float(np.median([s[2] for s in shifts]))
+
+    centre = np.array([ours.shape[0] // 2, ours.shape[1] // 2])
+    offset = _lattice_to_ground(model, band, terrain, centre, consensus, step=step, lat0=lat0)
+    before = float(np.linalg.norm(offset))
+
+    jacobian = np.empty((2, 2))
+    base = _mean_ground(model, band, terrain, lat0)
+    for index, axis in enumerate(("roll", "pitch")):
+        perturbed = _with_boresight(model, **{axis: PERTURBATION_RAD})
+        jacobian[:, index] = (
+            _mean_ground(perturbed, band, terrain, lat0) - base
+        ) / PERTURBATION_RAD
+
+    if abs(np.linalg.det(jacobian)) < 1e-9:
+        return _refused("the model is insensitive to a boresight rotation")
+
+    roll, pitch = np.linalg.solve(jacobian, -offset)
+    clock = float(offset[1]) / ground_speed_m_s if ground_speed_m_s else float("nan")
+
+    logger.info(
+        "Absolute geolocation vs the reference orthoimage: the product sits %.0f m away "
+        "(%.0f m east, %.0f m north) over %d matched windows, scatter %.1f lattice cells. "
+        "Correcting the boresight by roll %+.1f urad, pitch %+.1f urad. NOTE: the "
+        "along-track part is equally explained by a clock offset of %+.3f s; the two are "
+        "not separable from one strip, and pitch is a convention.",
+        before,
+        offset[0],
+        offset[1],
+        len(shifts),
+        scatter,
+        roll * 1e6,
+        pitch * 1e6,
+        clock,
+    )
+    return AbsoluteCorrection(
+        roll_rad=float(roll),
+        pitch_rad=float(pitch),
+        offset_before_m=before,
+        offset_after_m=float("nan"),
+        equivalent_clock_offset_s=clock,
+        peak=peak,
+        fitted=True,
     )
