@@ -396,7 +396,7 @@ class L1CPipeline:
         correction = None
         source = "terrain coastline"
         if self.reference_image is not None:
-            correction = absolute.estimate_against_reference(
+            refined, stages = absolute.refine_against_reference(
                 self.model,
                 band,
                 image,
@@ -404,19 +404,37 @@ class L1CPipeline:
                 self.terrain,
                 ground_speed_m_s=ground_speed,
             )
-            if correction.fitted:
+            if stages:
+                for number, stage in enumerate(stages, start=1):
+                    logger.info(
+                        "      stage %d: %.0f m -> boresight roll %+.1f, pitch %+.1f urad",
+                        number,
+                        stage.offset_before_m,
+                        stage.roll_rad * 1e6,
+                        stage.pitch_rad * 1e6,
+                    )
+                self.model = refined
+                self.camera = refined.camera
+                correction = stages[0]
+                qa["absolute_stages"] = [
+                    {
+                        "offset_before_m": round(stage.offset_before_m, 1),
+                        "roll_urad": round(stage.roll_rad * 1e6, 1),
+                        "pitch_urad": round(stage.pitch_rad * 1e6, 1),
+                    }
+                    for stage in stages
+                ]
                 source = (
                     f"reference orthoimage ({self.reference_image.acquired}, "
                     f"{self.reference_image.days_from_target} day(s) away, "
-                    f"{self.reference_image.cloud_cover:.0f}% cloud)"
+                    f"{self.reference_image.cloud_cover:.0f}% cloud), "
+                    f"{len(stages)} coarse-to-fine stage(s)"
                 )
             else:
                 logger.warning(
-                    "The reference orthoimage did not settle the geolocation (%s); "
-                    "falling back to the terrain's coastline.",
-                    correction.reason,
+                    "The reference orthoimage did not settle the geolocation; falling "
+                    "back to the terrain's coastline."
                 )
-                correction = None
 
         if correction is None:
             correction = absolute.estimate(
@@ -441,10 +459,13 @@ class L1CPipeline:
         if not correction.fitted:
             return
 
-        self.model = absolute._with_boresight(
-            self.model, roll=correction.roll_rad, pitch=correction.pitch_rad
-        )
-        self.camera = self.model.camera
+        if "orthoimage" not in source:
+            # The terrain fallback corrects in one pass; the orthoimage path has already
+            # applied its stages.
+            self.model = absolute._with_boresight(
+                self.model, roll=correction.roll_rad, pitch=correction.pitch_rad
+            )
+            self.camera = self.model.camera
         # The bias is corrected, but it is corrected against a *coastline in an
         # elevation model*, not against an orthoimage. That is a real reference and a
         # limited one: it is good to the DEM's own resolution and to how sharply the

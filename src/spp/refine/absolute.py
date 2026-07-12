@@ -400,45 +400,35 @@ def estimate_against_reference(
             transform=src.transform,
         ).round_offsets().round_lengths()
 
-        # The lattice samples the ground every `step` detector pixels; there is nothing
-        # to gain from reading the reference finer than that.
-        lattice_spacing_m = step * 3.8
-        decimation = max(1, int(lattice_spacing_m / abs(src.transform.a) / 2))
-        out_shape = (
-            max(1, int(read_window.height) // decimation),
-            max(1, int(read_window.width) // decimation),
+        # At NATIVE resolution. An earlier version decimated the reference to save
+        # bandwidth, then sampled it with nearest-neighbour -- two quantisations stacked,
+        # which put a floor of tens of metres under a measurement whose whole purpose is
+        # to resolve tens of metres. The saving was imaginary anyway: only the footprint's
+        # window is read, and at 10 m that is some tens of megabytes.
+        patch = src.read(1, window=read_window, boundless=True, fill_value=0).astype(
+            np.float64
         )
-
-        patch = src.read(
-            1, window=read_window, out_shape=out_shape, boundless=True, fill_value=0
-        ).astype(np.float64)
-        patch_transform = src.window_transform(read_window) * Affine.scale(
-            int(read_window.width) / out_shape[1], int(read_window.height) / out_shape[0]
-        )
+        patch_transform = src.window_transform(read_window)
         nodata = src.nodata
 
     if nodata is not None:
         patch[patch == nodata] = np.nan
     patch[patch == 0] = np.nan  # reference tiles pad with zero outside their footprint
 
-    inverse = ~patch_transform
-    cols_f, rows_f = inverse * (xs, ys)
-    rows = np.floor(rows_f).astype(np.int64)
-    cols = np.floor(cols_f).astype(np.int64)
-
-    inside = (rows >= 0) & (rows < patch.shape[0]) & (cols >= 0) & (cols < patch.shape[1])
-    reference_flat = np.full(rows.shape, np.nan)
-    reference_flat[inside] = patch[rows[inside], cols[inside]]
-
+    reference_flat = _bilinear_sample(patch, patch_transform, xs, ys)
     theirs = reference_flat.reshape(mesh_l.shape)
     if np.isfinite(theirs).mean() < 0.2:
         return _refused("the reference orthoimage does not cover the footprint")
 
     # Match window by window, so the result is a robust consensus rather than one
     # correlation over a scene that is mostly featureless water.
+    # Overlapping windows, so a narrow strip still yields enough cross-track samples.
+    # With non-overlapping windows the swath gives only a handful across, and the
+    # cross-track estimate is then decided by four numbers.
+    stride = max(1, window // 2)
     shifts = []
-    for row in range(0, ours.shape[0] - window + 1, window):
-        for col in range(0, ours.shape[1] - window + 1, window):
+    for row in range(0, ours.shape[0] - window + 1, stride):
+        for col in range(0, ours.shape[1] - window + 1, stride):
             a = ours[row : row + window, col : col + window]
             b = theirs[row : row + window, col : col + window]
             if not np.isfinite(b).all() or not has_texture(a) or not has_texture(b):
@@ -455,9 +445,23 @@ def estimate_against_reference(
         )
 
     shift_array = np.array([[s[0], s[1]] for s in shifts])
-    consensus = np.median(shift_array, axis=0)
+    peaks = np.array([s[2] for s in shifts])
+
+    # Reject outliers, then weight what survives by how firmly it locked on. A window
+    # over a cloud edge, a ship or a moving shadow will mismatch confidently, and a plain
+    # median gives it the same vote as a window that nailed a coastline.
+    centre = np.median(shift_array, axis=0)
+    deviation = np.abs(shift_array - centre)
+    mad = np.median(deviation, axis=0) * 1.4826
+    inliers = np.all(deviation <= np.maximum(3.0 * mad, 0.5), axis=1)
+    if inliers.sum() >= min_matches:
+        shift_array = shift_array[inliers]
+        peaks = peaks[inliers]
+
+    weights = peaks / peaks.sum()
+    consensus = (shift_array * weights[:, None]).sum(axis=0)
     scatter = float(np.median(np.abs(shift_array - consensus)) * 1.4826)
-    peak = float(np.median([s[2] for s in shifts]))
+    peak = float(np.median(peaks))
 
     centre = np.array([ours.shape[0] // 2, ours.shape[1] // 2])
     offset = _lattice_to_ground(model, band, terrain, centre, consensus, step=step, lat0=lat0)
@@ -501,3 +505,104 @@ def estimate_against_reference(
         peak=peak,
         fitted=True,
     )
+
+
+def _bilinear_sample(
+    grid: np.ndarray, transform, xs: np.ndarray, ys: np.ndarray
+) -> np.ndarray:
+    """Sample a georeferenced grid at arbitrary coordinates, bilinearly.
+
+    Nearest-neighbour would quantise the reference to its own pixel — which puts a floor
+    under a measurement whose entire purpose is to resolve displacements *smaller* than
+    that pixel.
+    """
+    cols_f, rows_f = (~transform) * (xs, ys)
+
+    rows = np.clip(np.floor(rows_f).astype(np.int64), 0, grid.shape[0] - 2)
+    cols = np.clip(np.floor(cols_f).astype(np.int64), 0, grid.shape[1] - 2)
+    dr = rows_f - rows
+    dc = cols_f - cols
+
+    top = grid[rows, cols] * (1 - dc) + grid[rows, cols + 1] * dc
+    bottom = grid[rows + 1, cols] * (1 - dc) + grid[rows + 1, cols + 1] * dc
+    values = top * (1 - dr) + bottom * dr
+
+    outside = (
+        (rows_f < 0)
+        | (rows_f >= grid.shape[0] - 1)
+        | (cols_f < 0)
+        | (cols_f >= grid.shape[1] - 1)
+    )
+    values[outside] = np.nan
+    return values
+
+
+def refine_against_reference(
+    model: SensorModel,
+    band: str,
+    image: np.ndarray,
+    reference_path: str,
+    terrain,
+    *,
+    ground_speed_m_s: float,
+    steps: tuple[int, ...] = (32, 16, 8),
+    tolerance_m: float = 5.0,
+) -> tuple[SensorModel, list[AbsoluteCorrection]]:
+    """Estimate and correct the pointing bias **coarse to fine**.
+
+    A single pass cannot do this, and the reason is worth stating because it is the
+    opposite of the intuition. Phase correlation finds a displacement by overlapping two
+    windows, so it can only see a shift that is *small compared to the window*. Make the
+    lattice finer and every cell covers less ground — which means a fixed displacement
+    spans **more** cells, until it approaches the window size and the correlation collapses.
+
+    On the reference acquisition the bias is ~919 m. On a 60 m lattice that is 15 cells in
+    a 64-cell window: recoverable. On a 30 m lattice it is 30 cells — half the window —
+    and the estimator returns a confident 25 m, which is noise. Refining the lattice made
+    the measurement *worse*, and it did so silently.
+
+    So the bias is removed in stages: a coarse lattice sees the large shift, the model is
+    corrected, and only then does a finer lattice have a small shift left to resolve. Each
+    stage is reported, and the sequence stops when the residual stops moving.
+
+    Returns
+    -------
+    tuple
+        The corrected model, and the correction from each stage.
+    """
+    corrections: list[AbsoluteCorrection] = []
+    current = model
+
+    for stage, step in enumerate(steps, start=1):
+        correction = estimate_against_reference(
+            current,
+            band,
+            image,
+            reference_path,
+            terrain,
+            ground_speed_m_s=ground_speed_m_s,
+            step=step,
+        )
+        if not correction.fitted:
+            logger.warning(
+                "Absolute geolocation, stage %d (lattice step %d): %s",
+                stage,
+                step,
+                correction.reason,
+            )
+            break
+
+        corrections.append(correction)
+        current = _with_boresight(
+            current, roll=correction.roll_rad, pitch=correction.pitch_rad
+        )
+
+        if correction.offset_before_m < tolerance_m:
+            logger.info(
+                "Absolute geolocation converged at stage %d: %.0f m remaining.",
+                stage,
+                correction.offset_before_m,
+            )
+            break
+
+    return current, corrections
