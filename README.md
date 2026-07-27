@@ -180,6 +180,27 @@ satellite-processing-pipeline/
 
 ---
 
+## Development process
+
+This project was built with AI-assisted development (Claude Code), directed
+and reviewed by me. The role split was deliberate:
+
+- **Mine:** the scope decision (implement L1B end-to-end, spec the rest),
+  the calibration model and its ordering, the per-line temperature timing
+  approach, the no-clipping/NaN-NoData policy, and every entry in
+  [`docs/decision_log.md`](docs/decision_log.md) — alternatives weighed,
+  trade-offs accepted.
+- **Assisted:** implementation of the modules against those decisions,
+  test scaffolding, and documentation drafts, all reviewed and iterated
+  before merge (see the PR history — corrections like the radiance-unit
+  fix and the CPF null-offset hardening came out of that review loop).
+
+I consider directing AI tooling effectively — knowing what to ask for,
+what to reject, and how to verify the result — part of the engineering
+work this repo demonstrates.
+
+---
+
 ## License
 
 MIT License.
